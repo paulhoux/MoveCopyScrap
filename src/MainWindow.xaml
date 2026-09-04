@@ -1,0 +1,215 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Window
+    x:Class="ImageCuller2.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:controls="using:ImageCuller2.Controls"
+    xmlns:models="using:ImageCuller2.Models"
+    mc:Ignorable="d">
+
+    <Grid x:Name="RootGrid" Background="{StaticResource AppBackgroundBrush}">
+
+        <!-- The carousel fills the whole window; the chrome floats on top of it so that
+             "fill window" mode can cover every pixel without a layout change. -->
+        <controls:CarouselView x:Name="Carousel" />
+
+        <!-- Empty state -->
+        <StackPanel x:Name="EmptyState"
+                    HorizontalAlignment="Center" VerticalAlignment="Center"
+                    Spacing="14" MaxWidth="420">
+            <Image x:Name="EmptyStateIcon" Width="72" Height="72" Opacity="0.55"
+                   HorizontalAlignment="Center" />
+            <TextBlock Text="No folder open"
+                       HorizontalAlignment="Center"
+                       FontSize="20" FontWeight="SemiBold" Opacity="0.9" />
+            <TextBlock TextWrapping="Wrap" TextAlignment="Center" Opacity="0.6"
+                       Text="Pick a folder of photos or videos. Use the arrow keys to move through them and the space bar to mark the keepers." />
+            <Button Content="Choose folder…" HorizontalAlignment="Center"
+                    Style="{StaticResource AccentButtonStyle}"
+                    Click="OnOpenFolderClick" />
+        </StackPanel>
+
+        <!-- Chrome overlay -->
+        <Grid x:Name="ChromeRoot">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <!-- Title bar + command bar -->
+            <Grid x:Name="TopChrome" Grid.Row="0" Background="{StaticResource AppChromeBrush}">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <Grid x:Name="AppTitleBar" Grid.Row="0" Height="40">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition x:Name="TitleBarRightPad" Width="0" />
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel Grid.Column="0" Orientation="Horizontal"
+                                Spacing="10" Margin="14,0,0,0" VerticalAlignment="Center">
+                        <Image x:Name="TitleBarIcon" Width="18" Height="18" VerticalAlignment="Center" />
+                        <TextBlock Text="ImageCuller 2" FontSize="13" FontWeight="SemiBold" />
+                        <TextBlock x:Name="FolderLabel" FontSize="12" Opacity="0.55"
+                                   TextTrimming="CharacterEllipsis" MaxWidth="620"
+                                   VerticalAlignment="Center" />
+                    </StackPanel>
+                </Grid>
+
+                <Grid Grid.Row="1" Height="52" Padding="10,0">
+                    <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                        <Button x:Name="OpenFolderButton" Style="{StaticResource CommandButtonStyle}"
+                                Click="OnOpenFolderClick" ToolTipService.ToolTip="Open folder (Ctrl+O)">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <FontIcon Glyph="&#xE838;" FontSize="15" />
+                                <TextBlock Text="Open folder" />
+                            </StackPanel>
+                        </Button>
+
+                        <Border Width="1" Height="22" Margin="6,0"
+                                Background="{StaticResource AppSubtleBorderBrush}" />
+
+                        <Button x:Name="MarkButton" Style="{StaticResource CommandButtonStyle}"
+                                Click="OnMarkClick" ToolTipService.ToolTip="Mark / unmark (Space)">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <FontIcon x:Name="MarkGlyph" Glyph="&#xE734;" FontSize="15" />
+                                <TextBlock x:Name="MarkButtonText" Text="Mark" />
+                            </StackPanel>
+                        </Button>
+
+                        <Border x:Name="MarkCountPill" CornerRadius="10" Padding="10,3"
+                                Margin="4,0,6,0" Background="#1FFFFFFF" VerticalAlignment="Center">
+                            <TextBlock x:Name="MarkCountText" Text="0 marked" FontSize="12" Opacity="0.85" />
+                        </Border>
+
+                        <Button x:Name="CopyButton" Style="{StaticResource CommandButtonStyle}" IsEnabled="False"
+                                Click="OnCopyMarkedClick" ToolTipService.ToolTip="Copy marked files to another folder (Ctrl+C)">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <FontIcon Glyph="&#xE8C8;" FontSize="15" />
+                                <TextBlock Text="Copy…" />
+                            </StackPanel>
+                        </Button>
+
+                        <Button x:Name="MoveButton" Style="{StaticResource CommandButtonStyle}" IsEnabled="False"
+                                Click="OnMoveMarkedClick" ToolTipService.ToolTip="Move marked files to another folder (Ctrl+M)">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <FontIcon Glyph="&#xE8DE;" FontSize="15" />
+                                <TextBlock Text="Move…" />
+                            </StackPanel>
+                        </Button>
+
+                        <Button x:Name="DeleteButton" Style="{StaticResource CommandButtonStyle}" IsEnabled="False"
+                                Foreground="{StaticResource AppDangerBrush}"
+                                Click="OnDeleteMarkedClick" ToolTipService.ToolTip="Delete marked files (Delete)">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <FontIcon Glyph="&#xE74D;" FontSize="15" />
+                                <TextBlock Text="Delete…" />
+                            </StackPanel>
+                        </Button>
+                    </StackPanel>
+
+                    <StackPanel Orientation="Horizontal" Spacing="4"
+                                HorizontalAlignment="Right" VerticalAlignment="Center">
+                        <TextBlock x:Name="PositionText" Text="" FontSize="12" Opacity="0.55"
+                                   VerticalAlignment="Center" Margin="0,0,10,0" />
+                        <ToggleButton x:Name="FillModeButton" Style="{StaticResource CommandToggleStyle}"
+                                      Click="OnFillModeClick" ToolTipService.ToolTip="Fill the window (F / Enter)">
+                            <FontIcon Glyph="&#xE740;" FontSize="15" />
+                        </ToggleButton>
+                        <Button x:Name="HelpButton" Style="{StaticResource CommandButtonStyle}"
+                                ToolTipService.ToolTip="Keyboard shortcuts">
+                            <FontIcon Glyph="&#xE897;" FontSize="15" />
+                            <Button.Flyout>
+                                <Flyout Placement="BottomEdgeAlignedRight">
+                                    <StackPanel Spacing="6" MinWidth="280">
+                                        <TextBlock Text="Shortcuts" FontWeight="SemiBold" Margin="0,0,0,4" />
+                                        <TextBlock Text="←  →   previous / next image" Opacity="0.8" />
+                                        <TextBlock Text="Home / End   first / last image" Opacity="0.8" />
+                                        <TextBlock Text="Space   mark or unmark" Opacity="0.8" />
+                                        <TextBlock Text="F or Enter   fill the window" Opacity="0.8" />
+                                        <TextBlock Text="Esc   leave fill mode" Opacity="0.8" />
+                                        <TextBlock Text="F11   full screen" Opacity="0.8" />
+                                        <TextBlock Text="Ctrl+O   open folder" Opacity="0.8" />
+                                        <TextBlock Text="Ctrl+C / Ctrl+M   copy / move marked" Opacity="0.8" />
+                                        <TextBlock Text="Delete   delete marked" Opacity="0.8" />
+                                        <TextBlock Text="Mouse: wheel scrolls, click a side image to go to it, click the centre to fill the window, right-click to mark." TextWrapping="Wrap" Opacity="0.6" Margin="0,6,0,0" />
+                                    </StackPanel>
+                                </Flyout>
+                            </Button.Flyout>
+                        </Button>
+                    </StackPanel>
+                </Grid>
+            </Grid>
+
+            <!-- Filmstrip -->
+            <Grid x:Name="FilmstripHost" Grid.Row="2" Background="{StaticResource AppChromeBrush}">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <TextBlock x:Name="CaptionText" Grid.Row="0"
+                           Margin="16,8,16,2" FontSize="12" Opacity="0.6"
+                           TextTrimming="CharacterEllipsis" />
+
+                <ScrollViewer x:Name="FilmstripScroller" Grid.Row="1"
+                              Height="116" Padding="12,4,12,10"
+                              HorizontalScrollMode="Enabled" HorizontalScrollBarVisibility="Hidden"
+                              VerticalScrollMode="Disabled" VerticalScrollBarVisibility="Disabled"
+                              IsVerticalRailEnabled="False" ZoomMode="Disabled">
+                    <ItemsRepeater x:Name="Filmstrip" HorizontalAlignment="Left"
+                                   ElementPrepared="OnFilmstripElementPrepared">
+                        <ItemsRepeater.Layout>
+                            <StackLayout Orientation="Horizontal" Spacing="6" />
+                        </ItemsRepeater.Layout>
+                        <ItemsRepeater.ItemTemplate>
+                            <DataTemplate x:DataType="models:MediaItem">
+                                <Grid Width="98" Height="98" CornerRadius="6"
+                                      Background="{StaticResource AppThumbBackgroundBrush}"
+                                      Opacity="{x:Bind UnselectedDim, Mode=OneWay}">
+                                    <Image Source="{x:Bind Thumbnail, Mode=OneWay}" Stretch="Uniform" />
+
+                                    <Border BorderBrush="{StaticResource AppAccentBrush}" BorderThickness="2"
+                                            CornerRadius="6" Opacity="{x:Bind SelectionOpacity, Mode=OneWay}" />
+
+                                    <Border Background="{StaticResource AppMarkBrush}" CornerRadius="9"
+                                            Width="18" Height="18" Margin="4"
+                                            HorizontalAlignment="Right" VerticalAlignment="Top"
+                                            Visibility="{x:Bind MarkBadgeVisibility, Mode=OneWay}">
+                                        <FontIcon Glyph="&#xE735;" FontSize="9" Foreground="#FF1A1400" />
+                                    </Border>
+
+                                    <Border Background="#99000000" CornerRadius="9"
+                                            Width="18" Height="18" Margin="4"
+                                            HorizontalAlignment="Left" VerticalAlignment="Bottom"
+                                            Visibility="{x:Bind VideoBadgeVisibility}">
+                                        <FontIcon Glyph="&#xE768;" FontSize="9" />
+                                    </Border>
+                                </Grid>
+                            </DataTemplate>
+                        </ItemsRepeater.ItemTemplate>
+                    </ItemsRepeater>
+                </ScrollViewer>
+            </Grid>
+        </Grid>
+
+        <!-- Transient status -->
+        <InfoBar x:Name="Status" IsOpen="False" IsClosable="True"
+                 HorizontalAlignment="Center" VerticalAlignment="Bottom"
+                 Margin="0,0,0,168" MinWidth="360" MaxWidth="640" />
+
+        <!-- Busy overlay -->
+        <Grid x:Name="BusyOverlay" Background="#B8000000" Visibility="Collapsed">
+            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="14" MinWidth="260">
+                <ProgressBar x:Name="BusyProgress" IsIndeterminate="True" Width="260" />
+                <TextBlock x:Name="BusyText" Text="Working…" HorizontalAlignment="Center" Opacity="0.85" />
+            </StackPanel>
+        </Grid>
+    </Grid>
+</Window>

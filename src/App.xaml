@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Application
+    x:Class="ImageCuller2.App"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    RequestedTheme="Dark">
+
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <XamlControlsResources xmlns="using:Microsoft.UI.Xaml.Controls" />
+            </ResourceDictionary.MergedDictionaries>
+
+            <!-- Palette -->
+            <Color x:Key="AppBackgroundColor">#FF121215</Color>
+            <Color x:Key="AppChromeColor">#E61A1A1F</Color>
+            <Color x:Key="AppCardColor">#FF1E1E24</Color>
+            <Color x:Key="AppAccentColor">#FF5AA9FF</Color>
+            <Color x:Key="AppMarkColor">#FFFFC44D</Color>
+            <Color x:Key="AppDangerColor">#FFFF6B6B</Color>
+
+            <SolidColorBrush x:Key="AppBackgroundBrush" Color="{StaticResource AppBackgroundColor}" />
+            <SolidColorBrush x:Key="AppChromeBrush" Color="{StaticResource AppChromeColor}" />
+            <SolidColorBrush x:Key="AppCardBrush" Color="{StaticResource AppCardColor}" />
+            <SolidColorBrush x:Key="AppAccentBrush" Color="{StaticResource AppAccentColor}" />
+            <SolidColorBrush x:Key="AppMarkBrush" Color="{StaticResource AppMarkColor}" />
+            <SolidColorBrush x:Key="AppDangerBrush" Color="{StaticResource AppDangerColor}" />
+            <SolidColorBrush x:Key="AppSubtleBorderBrush" Color="#26FFFFFF" />
+            <SolidColorBrush x:Key="AppThumbBackgroundBrush" Color="#FF232329" />
+
+            <!-- Command bar buttons -->
+            <Style x:Key="CommandButtonStyle" TargetType="Button" BasedOn="{StaticResource DefaultButtonStyle}">
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="BorderBrush" Value="Transparent" />
+                <Setter Property="Padding" Value="12,7" />
+                <Setter Property="CornerRadius" Value="6" />
+                <Setter Property="FontSize" Value="13" />
+            </Style>
+
+            <Style x:Key="CommandToggleStyle" TargetType="ToggleButton" BasedOn="{StaticResource DefaultToggleButtonStyle}">
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="BorderBrush" Value="Transparent" />
+                <Setter Property="Padding" Value="12,7" />
+                <Setter Property="CornerRadius" Value="6" />
+                <Setter Property="FontSize" Value="13" />
+            </Style>
+
+        </ResourceDictionary>
+    </Application.Resources>
+</Application>

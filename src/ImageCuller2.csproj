@@ -1,0 +1,75 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
+    <SupportedOSPlatformVersion>10.0.17763.0</SupportedOSPlatformVersion>
+
+    <RootNamespace>ImageCuller2</RootNamespace>
+    <AssemblyName>ImageCuller2</AssemblyName>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+
+    <!-- Embedded into the .exe: Explorer, the taskbar and Alt+Tab read it from there. -->
+    <ApplicationIcon>..\ImageCuller.ico</ApplicationIcon>
+
+    <Platforms>x64;ARM64</Platforms>
+    <RuntimeIdentifiers>win-x64;win-arm64</RuntimeIdentifiers>
+
+    <!-- Unpackaged (no MSIX): the Windows App SDK bootstrapper is initialised
+         automatically when WindowsPackageType is None. -->
+    <UseWinUI>true</UseWinUI>
+    <WindowsPackageType>None</WindowsPackageType>
+
+    <!-- EnableMsixTooling=true does NOT make this a packaged app - WindowsPackageType=None
+         above still rules, and Microsoft.Build.Msix.Packaging.targets explicitly supports it.
+         What it does is select the Windows App SDK's own MSIX/PRI build tooling, whose MSBuild
+         tasks ship inside the NuGet package (tools/net472/Microsoft.Build.Msix.dll).
+
+         With it off, the SDK falls back to the legacy MrtCore.PriGen.targets, which loads
+         Microsoft.Build.Packaging.Pri.Tasks.dll out of a Visual Studio installation's
+         MSBuild\Microsoft\VisualStudio\v17.0\AppxPackage folder. That folder does not exist
+         under the dotnet CLI or under VS "Build Tools", and the build dies with MSB4062.
+
+         resources.pri is required either way: WinUI 3 resolves ms-appx:/// XAML through it. -->
+    <EnableMsixTooling>true</EnableMsixTooling>
+
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <PublishTrimmed>false</PublishTrimmed>
+    <PublishReadyToRun>false</PublishReadyToRun>
+    <DefaultLanguage>en-US</DefaultLanguage>
+    <Version>1.0.0</Version>
+
+    <!-- CS1668: CMake's Visual Studio generator exports the C++ toolchain's LIB environment
+         variable, and csc warns about the native lib directories in it. Harmless for C#. -->
+    <NoWarn>$(NoWarn);CS1668</NoWarn>
+    <Company>ImageCuller2</Company>
+    <Product>ImageCuller 2</Product>
+  </PropertyGroup>
+
+  <!-- Visual Studio sets Platform but not RuntimeIdentifier; derive it so that
+       SelfContained builds work from the IDE as well as from CMake. -->
+  <PropertyGroup>
+    <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == '' And '$(Platform)' == 'x64'">win-x64</RuntimeIdentifier>
+    <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == '' And '$(Platform)' == 'ARM64'">win-arm64</RuntimeIdentifier>
+    <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == ''">win-x64</RuntimeIdentifier>
+    <SelfContained Condition="'$(SelfContained)' == ''">true</SelfContained>
+    <WindowsAppSDKSelfContained Condition="'$(WindowsAppSDKSelfContained)' == ''">true</WindowsAppSDKSelfContained>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Floating version: picks up the newest installed/available 1.7.x so the
+         build does not break on an exact patch number. Pin it if you prefer. -->
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.7.*" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- A loose copy next to the exe, so AppWindow.SetIcon() can give the window and its
+         taskbar button a real icon, and so the title bar and empty state can show it.
+         The embedded ApplicationIcon above is not reachable as a file at runtime. -->
+    <None Include="..\ImageCuller.ico" Link="Assets\ImageCuller.ico" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

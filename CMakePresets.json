@@ -1,0 +1,50 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": { "major": 3, "minor": 21, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "vs2022-x64",
+      "displayName": "Visual Studio 2022 (x64)",
+      "generator": "Visual Studio 17 2022",
+      "architecture": "x64",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": {
+        "IC_RUNTIME_IDENTIFIER": "win-x64",
+        "IC_SELF_CONTAINED": "ON",
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/dist"
+      }
+    },
+    {
+      "name": "vs2022-arm64",
+      "displayName": "Visual Studio 2022 (ARM64)",
+      "generator": "Visual Studio 17 2022",
+      "architecture": "ARM64",
+      "binaryDir": "${sourceDir}/build-arm64",
+      "cacheVariables": {
+        "IC_RUNTIME_IDENTIFIER": "win-arm64",
+        "IC_SELF_CONTAINED": "ON",
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/dist-arm64"
+      }
+    },
+    {
+      "name": "ninja-x64",
+      "displayName": "Ninja Multi-Config (x64)",
+      "generator": "Ninja Multi-Config",
+      "binaryDir": "${sourceDir}/build-ninja",
+      "cacheVariables": {
+        "IC_RUNTIME_IDENTIFIER": "win-x64",
+        "IC_SELF_CONTAINED": "ON",
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/dist"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "debug",   "configurePreset": "vs2022-x64", "configuration": "Debug" },
+    { "name": "release", "configurePreset": "vs2022-x64", "configuration": "Release" },
+    { "name": "run",     "configurePreset": "vs2022-x64", "configuration": "Release", "targets": [ "run" ] },
+    { "name": "arm64-release", "configurePreset": "vs2022-arm64", "configuration": "Release" },
+    { "name": "ninja-debug",   "configurePreset": "ninja-x64", "configuration": "Debug" },
+    { "name": "ninja-release", "configurePreset": "ninja-x64", "configuration": "Release" },
+    { "name": "ninja-run",     "configurePreset": "ninja-x64", "configuration": "Release", "targets": [ "run" ] }
+  ]
+}

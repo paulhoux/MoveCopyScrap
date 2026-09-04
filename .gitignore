@@ -1,0 +1,19 @@
+# CMake
+/build*/
+/dist*/
+CMakeUserPresets.json
+
+# MSBuild / .NET
+[Bb]in/
+[Oo]bj/
+*.user
+*.suo
+*.binlog
+
+# Visual Studio
+.vs/
+*.sln.docstates
+
+# NuGet
+packages/
+*.nupkg
