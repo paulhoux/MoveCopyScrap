@@ -16,8 +16,18 @@
     BaseIntermediateOutputPath inside the .csproj itself would be too late.
 
     CMakeLists.txt mirrors these paths in MCS_ARTIFACT_ROOT; keep the two in step.
+
+    The .csproj condition is load-bearing, not tidiness. Directory.Build.props is picked
+    up by *every* project underneath it, including the .vcxproj files CMake generates into
+    build\ - and CMake names its custom target after the project, so $(MSBuildProjectName)
+    is "MoveCopyScrap" for both. Without the condition the two share one obj\ folder, the
+    C++ project finds the C# project's project.assets.json there, looks for a C++ target
+    framework inside it and fails with:
+
+        Microsoft.NuGet.targets(198,5): error : Sequence contains no elements
+           at Microsoft.NuGet.Build.Tasks.ResolveNuGetPackageAssets.GiveErrorForMissingFramework()
   -->
-  <PropertyGroup>
+  <PropertyGroup Condition="'$(MSBuildProjectExtension)' == '.csproj'">
     <BaseIntermediateOutputPath>$(MSBuildThisFileDirectory)build\obj\$(MSBuildProjectName)\</BaseIntermediateOutputPath>
     <BaseOutputPath>$(MSBuildThisFileDirectory)build\bin\$(MSBuildProjectName)\</BaseOutputPath>
   </PropertyGroup>
