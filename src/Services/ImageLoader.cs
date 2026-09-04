@@ -13,7 +13,14 @@ namespace ImageCuller2.Services;
 /// </summary>
 public sealed class ImageLoader
 {
-    private const int CacheCapacity = 9;
+    // The carousel realises seven slots and decodes for all of them, so the cache has to
+    // hold at least that many or navigating one step would evict what is still on screen.
+    private const int CacheCapacity = 12;
+
+    // Decode sizes are rounded up to a multiple of this, so a small window resize does not
+    // trigger a re-decode. Kept modest on purpose: the step is also the *smallest* decode,
+    // and a tall, narrow picture asked for 512px wide comes back thousands of pixels tall.
+    private const int BucketStep = 256;
 
     private readonly Dictionary<string, CacheEntry> _cache = new(StringComparer.OrdinalIgnoreCase);
     private readonly LinkedList<string> _order = new();
@@ -33,12 +40,13 @@ public sealed class ImageLoader
 
     /// <summary>
     /// Returns a bitmap for <paramref name="item"/> decoded to at least
-    /// <paramref name="targetPixelWidth"/> physical pixels wide (rounded up in 512px steps
-    /// so that small window resizes do not cause re-decodes).
+    /// <paramref name="targetPixelWidth"/> physical pixels wide, rounded up to a
+    /// <see cref="BucketStep"/> multiple. Never decodes larger than the source.
     /// </summary>
     public async Task<BitmapImage?> LoadAsync(MediaItem item, int targetPixelWidth)
     {
-        int bucket = Math.Clamp(((targetPixelWidth + 511) / 512) * 512, 512, 8192);
+        int bucket = Math.Clamp(
+            ((targetPixelWidth + BucketStep - 1) / BucketStep) * BucketStep, BucketStep, 8192);
 
         if (_cache.TryGetValue(item.Path, out var cached) && cached.DecodedWidth >= bucket)
         {

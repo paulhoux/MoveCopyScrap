@@ -41,6 +41,7 @@ public sealed class CarouselView : Grid
     private const float SideAngleDegrees = 26f;      // Y rotation of the neighbours
     private const double SideOpacity = 0.80;
     private const double OverlapFraction = 0.055;    // how much the centre may cover a neighbour
+    private const double MinRevealFraction = 0.07;   // how much of a neighbour must stay uncovered
     private const double CellWidthFraction = 0.60;   // centre cell width, fraction of the control
     private const double CellHeightFraction = 0.94;
     private const float PerspectiveDistance = 1500f;
@@ -424,7 +425,29 @@ public sealed class CarouselView : Grid
                 else
                 {
                     scale = magnitude == 1 ? SideScale : FarScale;
-                    double firstRing = (centreWidth / 2) + (slot.Width * SideScale / 2) - overlap;
+
+                    // Where a neighbour sits, measured from the centre of the control.
+                    //
+                    // The obvious rule - "the centre's half width, plus my own, less a bit
+                    // of overlap" - silently loses tall, narrow neighbours: their own half
+                    // width is tiny, so subtracting the overlap puts their outer edge
+                    // *inside* the centre image, which is drawn on top of them. A 0.12
+                    // aspect neighbour beside a square centre ended up 26px short of
+                    // showing at all.
+                    //
+                    // So the placement is stated as a guarantee instead: at least `reveal`
+                    // pixels of the neighbour must stick out past the centre's edge, where
+                    // `reveal` is the whole neighbour when it is narrower than that. Wide
+                    // neighbours are unaffected - for them the original rule already
+                    // reveals far more than the minimum.
+                    double sideHalf = slot.Width * SideScale / 2;
+                    double firstRing = (centreWidth / 2) + sideHalf - overlap;
+
+                    double reveal = Math.Min(slot.Width * SideScale, w * MinRevealFraction);
+                    double revealRing = (centreWidth / 2) + reveal - sideHalf;
+                    double edgeRing = (w / 2) - sideHalf - 8;   // but never push it off-screen
+                    firstRing = Math.Max(firstRing, Math.Min(revealRing, edgeRing));
+
                     tx = sign * (magnitude == 1
                         ? firstRing
                         : firstRing + ((magnitude - 1) * slot.Width * SideScale * 0.85));
@@ -591,21 +614,35 @@ public sealed class CarouselView : Grid
 
     // ---- pictures --------------------------------------------------------
 
-    /// <summary>Loads full-resolution bitmaps for the centre and its two neighbours.</summary>
+    /// <summary>
+    /// Decodes a real bitmap for every realised slot, nearest first.
+    ///
+    /// Every slot, not just the visible ones: a slot only becomes a neighbour at the
+    /// moment it slides into view, so requesting the decode then means watching the
+    /// 256px thumbnail sharpen after the fact - and if you keep pressing an arrow key,
+    /// never seeing anything but thumbnails. The off-screen buffer slots are staged
+    /// instead, so a picture is already decoded by the time it appears.
+    ///
+    /// And at <c>slot.Width</c>, which is the width the picture would have *as the
+    /// centre*, not the 72% it is drawn at while a neighbour. That costs nothing extra
+    /// (the decode is bounded by the source's own size) and means promoting a neighbour
+    /// to the centre needs no second decode at all.
+    /// </summary>
     private void RequestPictures()
     {
         if (_items.Count == 0 || ActualWidth < 32) return;
 
         double rasterScale = XamlRoot?.RasterizationScale ?? 1.0;
 
-        foreach (var slot in _active.Values)
+        // Nearest first, so the centre is queued ahead of the buffer slots.
+        foreach (var slot in _active.Values.OrderBy(s => Math.Abs(s.Index - _currentIndex)))
         {
             int magnitude = Math.Abs(slot.Index - _currentIndex);
-            if (magnitude > 1 || slot.Item is null) continue;
+            if (slot.Item is null) continue;
 
             double displayWidth = _fillMode && magnitude == 0
                 ? ActualWidth
-                : slot.Width * (magnitude == 0 ? 1 : SideScale);
+                : slot.Width;
             int target = (int)Math.Ceiling(displayWidth * rasterScale);
             if (target <= slot.LoadedWidth) continue;
 
