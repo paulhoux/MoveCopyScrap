@@ -237,8 +237,27 @@ them slightly. If the rotation direction is not to your taste, flip the sign in
 ### Tuning
 
 The constants at the top of `CarouselView` control the look: `SideScale`, `SideAngleDegrees`,
-`OverlapFraction`, `CellWidthFraction`, `PerspectiveDistance`, `TransitionDuration` (200 ms),
-`KenBurnsZoom` and `KenBurnsPeriod`.
+`OverlapFraction`, `MinRevealFraction`, `CellWidthFraction`, `PerspectiveDistance` and
+`TransitionDuration` (200 ms).
+
+Fill mode's Ken Burns drift is driven by the crop rather than by a fixed distance. Cover-filling
+fits one axis exactly and overflows the other, so the pan travels along whichever axis the crop
+is hiding — vertically for a portrait picture in a landscape window, horizontally for a panorama
+— far enough to reveal all of it. `KenBurnsPixelsPerSecond` then sets the period from that
+distance, so the motion reads at the same speed whether it is nudging a landscape shot (~20 s) or
+crossing a tall one (~60 s). `KenBurnsZoom` is the zoom depth, `KenBurnsEdgeGuard` the couple of
+pixels of crop held back from the pan, and `KenBurnsMaxSweepFraction` a safety bound that only
+bites on extreme aspect ratios.
+
+The pan is bounded by the crop available at the *minimum* scale, never by the extra room the zoom
+opens up. The two are eased differently — the pan decelerates into its extremes, the zoom eases in
+and out — so part way through a segment the pan can run ahead of the zoom that was meant to be
+making room for it, and the background shows. Since the zoom never drops below `cover`, bounding
+the pan by the resting crop is safe at every instant regardless of easing. A picture whose aspect
+already matches the window has no slack at all, so it only zooms.
+
+The loop starts and ends at zero offset — the exact framing the fill transition leaves behind —
+so there is no jump entering the mode, and none at the seam between repeats either.
 
 ---
 

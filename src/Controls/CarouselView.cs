@@ -46,8 +46,11 @@ public sealed class CarouselView : Grid
     private const double CellHeightFraction = 0.94;
     private const float PerspectiveDistance = 1500f;
     private const double KenBurnsZoom = 1.16;
-    private const double KenBurnsDrift = 0.05;
-    private static readonly TimeSpan KenBurnsPeriod = TimeSpan.FromSeconds(22);
+    private const double KenBurnsEdgeGuard = 2.0;          // px of crop held back from the pan
+    private const double KenBurnsMaxSweepFraction = 1.0;   // safety bound; only bites on extreme aspects
+    private const double KenBurnsPixelsPerSecond = 55;     // a longer sweep just takes longer
+    private static readonly TimeSpan KenBurnsMinPeriod = TimeSpan.FromSeconds(20);
+    private static readonly TimeSpan KenBurnsMaxPeriod = TimeSpan.FromSeconds(60);
 
     public static readonly TimeSpan TransitionDuration = TimeSpan.FromMilliseconds(200);
     public static readonly TimeSpan ModeDuration = TimeSpan.FromMilliseconds(320);
@@ -60,7 +63,6 @@ public sealed class CarouselView : Grid
 
     private Compositor? _compositor;
     private CompositionEasingFunction? _ease;
-    private CompositionEasingFunction? _linear;
 
     private IReadOnlyList<MediaItem> _items = Array.Empty<MediaItem>();
     private int _currentIndex = -1;
@@ -181,7 +183,6 @@ public sealed class CarouselView : Grid
 
         _compositor = ElementCompositionPreview.GetElementVisual(this).Compositor;
         _ease = _compositor.CreateCubicBezierEasingFunction(new Vector2(0.15f, 0.0f), new Vector2(0.0f, 1.0f));
-        _linear = _compositor.CreateLinearEasingFunction();
 
         for (int i = 0; i < (Wing * 2) + 1; i++)
         {
@@ -571,29 +572,84 @@ public sealed class CarouselView : Grid
         if (slot.Item?.IsVideo == true) return;    // let video play untouched
 
         double w = ActualWidth, h = ActualHeight;
-        double cover = Math.Max(w / Math.Max(1, slot.Width), h / Math.Max(1, slot.Height));
+        double slotW = Math.Max(1, slot.Width);
+        double slotH = Math.Max(1, slot.Height);
 
-        float from = (float)cover;
-        float to = (float)(cover * KenBurnsZoom);
+        // The fill transition left the picture at exactly this scale with no offset, and
+        // the loop below both starts and ends there, so entering the mode never jumps.
+        double cover = Math.Max(w / slotW, h / slotH);
+        double shownW = slotW * cover;
+        double shownH = slotH * cover;
+
+        // What the crop is hiding, per axis. Cover-filling always fits one axis exactly
+        // and overflows the other, so a portrait picture in a landscape window has all
+        // of its slack vertically -- and that is the axis worth travelling along.
+        double hiddenX = Math.Max(0, shownW - w);
+        double hiddenY = Math.Max(0, shownH - h);
+
+        // How far the pan may travel, per axis: half of what the crop hides, less a couple
+        // of pixels for rounding.
+        //
+        // Only the room that exists at the *minimum* scale counts. It is tempting to also
+        // borrow the room the zoom opens up, and an earlier version of this did -- but the
+        // pan and the zoom are eased differently (the pan decelerates into its extremes,
+        // the zoom eases in and out), so part way through a segment the pan runs ahead of
+        // the zoom that was supposed to be making room for it. Measured, that let up to
+        // 7px of background show early in each half-cycle.
+        //
+        // The zoom never drops below `cover`, so the overflow never drops below `hidden`,
+        // which makes a pan bounded by `hidden / 2` safe at every instant no matter how
+        // either curve is eased. The zoom is then free to add room on top.
+        double ampX = Math.Max(0, (hiddenX / 2) - KenBurnsEdgeGuard);
+        double ampY = Math.Max(0, (hiddenY / 2) - KenBurnsEdgeGuard);
+
+        ampX = Math.Min(ampX, w * KenBurnsMaxSweepFraction);
+        ampY = Math.Min(ampY, h * KenBurnsMaxSweepFraction);
+
+        // A longer sweep simply takes longer, so the motion reads at the same gentle
+        // speed whether it is nudging a landscape shot or crossing a tall one.
+        double travel = 4 * Math.Max(ampX, ampY);
+        var period = TimeSpan.FromSeconds(Math.Clamp(
+            travel / KenBurnsPixelsPerSecond,
+            KenBurnsMinPeriod.TotalSeconds,
+            KenBurnsMaxPeriod.TotalSeconds));
+
+        var smooth     = _compositor.CreateCubicBezierEasingFunction(new Vector2(0.42f, 0f), new Vector2(0.58f, 1f));
+        var decelerate = _compositor.CreateCubicBezierEasingFunction(new Vector2(0f, 0f), new Vector2(0.58f, 1f));
+        var accelerate = _compositor.CreateCubicBezierEasingFunction(new Vector2(0.42f, 0f), new Vector2(1f, 1f));
+
+        float c  = (float)cover;
+        float cz = (float)(cover * KenBurnsZoom);
 
         var zoom = _compositor.CreateVector3KeyFrameAnimation();
-        zoom.InsertKeyFrame(0f, new Vector3(from, from, 1), _linear!);
-        zoom.InsertKeyFrame(1f, new Vector3(to, to, 1), _linear!);
-        zoom.Duration = KenBurnsPeriod;
+        zoom.InsertKeyFrame(0f,   new Vector3(c, c, 1), smooth);
+        zoom.InsertKeyFrame(0.5f, new Vector3(cz, cz, 1), smooth);
+        zoom.InsertKeyFrame(1f,   new Vector3(c, c, 1), smooth);
+        zoom.Duration = period;
         zoom.IterationBehavior = AnimationIterationBehavior.Forever;
-        zoom.Direction = AnimationDirection.Alternate;
         slot.Visual.StartAnimation("Scale", zoom);
 
-        float dx = (float)(w * KenBurnsDrift);
-        float dy = (float)(h * KenBurnsDrift * 0.6);
-
-        var pan = _compositor.CreateVector3KeyFrameAnimation();
-        pan.InsertKeyFrame(0f, Vector3.Zero, _linear!);
-        pan.InsertKeyFrame(1f, new Vector3(dx, dy, 0), _linear!);
-        pan.Duration = KenBurnsPeriod;
-        pan.IterationBehavior = AnimationIterationBehavior.Forever;
-        pan.Direction = AnimationDirection.Alternate;
-        slot.Visual.StartAnimation("Translation", pan);
+        // A closed loop rather than an alternating one. It begins and ends at no offset,
+        // which is exactly where the fill transition put the picture, so there is no jump
+        // entering the mode and none at the seam between iterations either. Decelerating
+        // into each extreme and accelerating away keeps the reversals from reading as a
+        // bounce, while the crossings back through centre stay at full speed.
+        //
+        // Skipped outright when the crop hides nothing worth showing - a picture whose
+        // aspect already matches the window has no slack to pan into, and only the zoom
+        // moves. Trying to drift one anyway is what used to reveal the background.
+        if (ampX >= 1 || ampY >= 1)
+        {
+            var pan = _compositor.CreateVector3KeyFrameAnimation();
+            pan.InsertKeyFrame(0f,    Vector3.Zero, smooth);
+            pan.InsertKeyFrame(0.25f, new Vector3((float)-ampX, (float)-ampY, 0), decelerate);
+            pan.InsertKeyFrame(0.5f,  Vector3.Zero, accelerate);
+            pan.InsertKeyFrame(0.75f, new Vector3((float)ampX, (float)ampY, 0), decelerate);
+            pan.InsertKeyFrame(1f,    Vector3.Zero, accelerate);
+            pan.Duration = period;
+            pan.IterationBehavior = AnimationIterationBehavior.Forever;
+            slot.Visual.StartAnimation("Translation", pan);
+        }
 
         slot.KenBurnsRunning = true;
     }
