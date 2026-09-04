@@ -6,12 +6,12 @@
     <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
     <SupportedOSPlatformVersion>10.0.17763.0</SupportedOSPlatformVersion>
 
-    <RootNamespace>ImageCuller2</RootNamespace>
-    <AssemblyName>ImageCuller2</AssemblyName>
+    <RootNamespace>MoveCopyScrap</RootNamespace>
+    <AssemblyName>MoveCopyScrap</AssemblyName>
     <ApplicationManifest>app.manifest</ApplicationManifest>
 
     <!-- Embedded into the .exe: Explorer, the taskbar and Alt+Tab read it from there. -->
-    <ApplicationIcon>..\ImageCuller.ico</ApplicationIcon>
+    <ApplicationIcon>..\assets\MoveCopyScrap.ico</ApplicationIcon>
 
     <Platforms>x64;ARM64</Platforms>
     <RuntimeIdentifiers>win-x64;win-arm64</RuntimeIdentifiers>
@@ -45,8 +45,8 @@
     <!-- CS1668: CMake's Visual Studio generator exports the C++ toolchain's LIB environment
          variable, and csc warns about the native lib directories in it. Harmless for C#. -->
     <NoWarn>$(NoWarn);CS1668</NoWarn>
-    <Company>ImageCuller2</Company>
-    <Product>ImageCuller 2</Product>
+    <Company>MoveCopyScrap</Company>
+    <Product>MoveCopyScrap</Product>
   </PropertyGroup>
 
   <!-- Visual Studio sets Platform but not RuntimeIdentifier; derive it so that
@@ -69,7 +69,7 @@
     <!-- A loose copy next to the exe, so AppWindow.SetIcon() can give the window and its
          taskbar button a real icon, and so the title bar and empty state can show it.
          The embedded ApplicationIcon above is not reachable as a file at runtime. -->
-    <None Include="..\ImageCuller.ico" Link="Assets\ImageCuller.ico" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\assets\MoveCopyScrap.ico" Link="Assets\MoveCopyScrap.ico" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

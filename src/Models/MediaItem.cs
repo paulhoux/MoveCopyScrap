@@ -3,7 +3,7 @@ using System.Runtime.CompilerServices;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Media;
 
-namespace ImageCuller2.Models;
+namespace MoveCopyScrap.Models;
 
 /// <summary>
 /// One image or video in the current folder. Everything the filmstrip and the carousel

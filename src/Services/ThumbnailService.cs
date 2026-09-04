@@ -1,4 +1,4 @@
-using ImageCuller2.Models;
+using MoveCopyScrap.Models;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml.Media.Imaging;
 using Windows.Graphics.Imaging;
@@ -6,7 +6,7 @@ using Windows.Storage;
 using Windows.Storage.FileProperties;
 using Windows.Storage.Streams;
 
-namespace ImageCuller2.Services;
+namespace MoveCopyScrap.Services;
 
 /// <summary>
 /// Produces filmstrip thumbnails on background threads.

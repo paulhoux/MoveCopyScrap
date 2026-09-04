@@ -1,7 +1,7 @@
-using ImageCuller2.Models;
+using MoveCopyScrap.Models;
 using Windows.Storage;
 
-namespace ImageCuller2.Services;
+namespace MoveCopyScrap.Services;
 
 public enum FileOperationKind
 {

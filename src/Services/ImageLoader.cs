@@ -1,7 +1,7 @@
-using ImageCuller2.Models;
+using MoveCopyScrap.Models;
 using Microsoft.UI.Xaml.Media.Imaging;
 
-namespace ImageCuller2.Services;
+namespace MoveCopyScrap.Services;
 
 /// <summary>
 /// Loads the large bitmaps shown by the carousel, decoded straight to the size they are

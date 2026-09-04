@@ -9,8 +9,8 @@
       "architecture": "x64",
       "binaryDir": "${sourceDir}/build",
       "cacheVariables": {
-        "IC_RUNTIME_IDENTIFIER": "win-x64",
-        "IC_SELF_CONTAINED": "ON",
+        "MCS_RUNTIME_IDENTIFIER": "win-x64",
+        "MCS_SELF_CONTAINED": "ON",
         "CMAKE_INSTALL_PREFIX": "${sourceDir}/dist"
       }
     },
@@ -21,8 +21,8 @@
       "architecture": "ARM64",
       "binaryDir": "${sourceDir}/build-arm64",
       "cacheVariables": {
-        "IC_RUNTIME_IDENTIFIER": "win-arm64",
-        "IC_SELF_CONTAINED": "ON",
+        "MCS_RUNTIME_IDENTIFIER": "win-arm64",
+        "MCS_SELF_CONTAINED": "ON",
         "CMAKE_INSTALL_PREFIX": "${sourceDir}/dist-arm64"
       }
     },
@@ -32,8 +32,8 @@
       "generator": "Ninja Multi-Config",
       "binaryDir": "${sourceDir}/build-ninja",
       "cacheVariables": {
-        "IC_RUNTIME_IDENTIFIER": "win-x64",
-        "IC_SELF_CONTAINED": "ON",
+        "MCS_RUNTIME_IDENTIFIER": "win-x64",
+        "MCS_SELF_CONTAINED": "ON",
         "CMAKE_INSTALL_PREFIX": "${sourceDir}/dist"
       }
     }

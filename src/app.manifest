@@ -3,7 +3,7 @@
           xmlns="urn:schemas-microsoft-com:asm.v1"
           xmlns:asmv3="urn:schemas-microsoft-com:asm.v3">
 
-  <assemblyIdentity version="1.0.0.0" name="ImageCuller2.app" />
+  <assemblyIdentity version="1.0.0.0" name="MoveCopyScrap.app" />
 
   <asmv3:application>
     <asmv3:windowsSettings>

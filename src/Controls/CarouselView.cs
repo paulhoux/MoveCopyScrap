@@ -1,6 +1,6 @@
 using System.Numerics;
-using ImageCuller2.Models;
-using ImageCuller2.Services;
+using MoveCopyScrap.Models;
+using MoveCopyScrap.Services;
 using Microsoft.UI.Composition;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
@@ -13,7 +13,7 @@ using Windows.Media.Playback;
 using Windows.Storage;
 using Windows.UI;
 
-namespace ImageCuller2.Controls;
+namespace MoveCopyScrap.Controls;
 
 /// <summary>
 /// The 3D image carousel.

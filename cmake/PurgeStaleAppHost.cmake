@@ -11,7 +11,9 @@
 #
 # So: delete any apphost older than those inputs and let the SDK make a fresh one.
 #
-# Invoked as:  cmake -DSRC_DIR=<src> -DROOT_DIR=<repo root> -P PurgeStaleAppHost.cmake
+# Invoked as:
+#   cmake -DSRC_DIR=<src> -DROOT_DIR=<repo root> -DOBJ_ROOT=<build/obj> \
+#         -P PurgeStaleAppHost.cmake
 # ---------------------------------------------------------------------------
 
 if(NOT DEFINED SRC_DIR)
@@ -20,6 +22,9 @@ endif()
 if(NOT DEFINED ROOT_DIR)
     set(ROOT_DIR "${SRC_DIR}/..")
 endif()
+if(NOT DEFINED OBJ_ROOT)
+    set(OBJ_ROOT "${ROOT_DIR}/build/obj")
+endif()
 
 # Everything the apphost stamping step consumes but does not declare as an input.
 set(_watched "")
@@ -27,14 +32,21 @@ if(EXISTS "${SRC_DIR}/app.manifest")
     list(APPEND _watched "${SRC_DIR}/app.manifest")
 endif()
 
-file(GLOB _icons "${ROOT_DIR}/*.ico" "${SRC_DIR}/*.ico" "${SRC_DIR}/Assets/*.ico")
+file(GLOB _icons
+     "${ROOT_DIR}/assets/*.ico"
+     "${SRC_DIR}/Assets/*.ico"
+     "${ROOT_DIR}/*.ico")          # legacy layout, harmless once empty
 list(APPEND _watched ${_icons})
 
 if(NOT _watched)
     return()
 endif()
 
-file(GLOB_RECURSE _apphosts "${SRC_DIR}/obj/*/apphost.exe")
+# Both the current location (Directory.Build.props redirects obj\ here) and the SDK
+# default next to the project, so the guard still works if that props file is removed.
+file(GLOB_RECURSE _apphosts
+     "${OBJ_ROOT}/*/apphost.exe"
+     "${SRC_DIR}/obj/*/apphost.exe")
 
 foreach(_apphost IN LISTS _apphosts)
     foreach(_input IN LISTS _watched)

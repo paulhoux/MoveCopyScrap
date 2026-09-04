@@ -1,0 +1,24 @@
+<Project>
+  <!--
+    Keep every generated file out of the source tree.
+
+    By default the .NET SDK writes obj\ and bin\ next to the .csproj. For a
+    self-contained WinUI 3 app that is several hundred megabytes of .NET runtime and
+    Windows App SDK sitting in src\, mixed in with the sources.
+
+    Set here rather than on the MSBuild command line so that it applies however the
+    project is built - through CMake, through `dotnet build`, or from Visual Studio -
+    and so that all three land in the same place.
+
+    Directory.Build.props is imported at the very top of Microsoft.Common.props, which
+    is early enough for NuGet: restore resolves the assets file through
+    MSBuildProjectExtensionsPath, which defaults to BaseIntermediateOutputPath. Setting
+    BaseIntermediateOutputPath inside the .csproj itself would be too late.
+
+    CMakeLists.txt mirrors these paths in MCS_ARTIFACT_ROOT; keep the two in step.
+  -->
+  <PropertyGroup>
+    <BaseIntermediateOutputPath>$(MSBuildThisFileDirectory)build\obj\$(MSBuildProjectName)\</BaseIntermediateOutputPath>
+    <BaseOutputPath>$(MSBuildThisFileDirectory)build\bin\$(MSBuildProjectName)\</BaseOutputPath>
+  </PropertyGroup>
+</Project>

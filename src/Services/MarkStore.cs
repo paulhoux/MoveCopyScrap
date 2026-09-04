@@ -3,12 +3,12 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace ImageCuller2.Services;
+namespace MoveCopyScrap.Services;
 
 /// <summary>
 /// Persists the set of marked files for one folder.
 ///
-/// The state lives in %LOCALAPPDATA%\ImageCuller2\marks\&lt;folder&gt;-&lt;hash&gt;.json so that
+/// The state lives in %LOCALAPPDATA%\MoveCopyScrap\marks\&lt;folder&gt;-&lt;hash&gt;.json so that
 /// nothing is ever written into the user's picture folders (which may be read-only or on a
 /// network share). Writes are debounced and atomic, so a crash leaves either the previous
 /// or the new file intact - never a half-written one.
@@ -34,7 +34,7 @@ public sealed class MarkStore : IDisposable
 
     public static string StateDirectory =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                     "ImageCuller2", "marks");
+                     "MoveCopyScrap", "marks");
 
     public string StateFilePath => _stateFile;
 

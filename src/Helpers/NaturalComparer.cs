@@ -1,4 +1,4 @@
-namespace ImageCuller2.Helpers;
+namespace MoveCopyScrap.Helpers;
 
 /// <summary>
 /// Sorts file names the way Explorer does: "IMG_2.jpg" before "IMG_10.jpg".

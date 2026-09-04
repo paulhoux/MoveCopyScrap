@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Window
-    x:Class="ImageCuller2.MainWindow"
+    x:Class="MoveCopyScrap.MainWindow"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-    xmlns:controls="using:ImageCuller2.Controls"
-    xmlns:models="using:ImageCuller2.Models"
+    xmlns:controls="using:MoveCopyScrap.Controls"
+    xmlns:models="using:MoveCopyScrap.Models"
     mc:Ignorable="d">
 
     <Grid x:Name="RootGrid" Background="{StaticResource AppBackgroundBrush}">
@@ -55,7 +55,7 @@
                     <StackPanel Grid.Column="0" Orientation="Horizontal"
                                 Spacing="10" Margin="14,0,0,0" VerticalAlignment="Center">
                         <Image x:Name="TitleBarIcon" Width="18" Height="18" VerticalAlignment="Center" />
-                        <TextBlock Text="ImageCuller 2" FontSize="13" FontWeight="SemiBold" />
+                        <TextBlock Text="MoveCopyScrap" FontSize="13" FontWeight="SemiBold" />
                         <TextBlock x:Name="FolderLabel" FontSize="12" Opacity="0.55"
                                    TextTrimming="CharacterEllipsis" MaxWidth="620"
                                    VerticalAlignment="Center" />

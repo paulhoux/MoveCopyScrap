@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Builds ImageCuller 2, installing any missing prerequisite as it goes.
+    Builds MoveCopyScrap, installing any missing prerequisite as it goes.
 
 .DESCRIPTION
     .NET SDK -> CMake -> a CMake generator -> Visual C++ runtime -> configure,
@@ -71,8 +71,8 @@ $ErrorActionPreference = 'Stop'
 
 $RepoDir     = $PSScriptRoot
 $PresetsFile = Join-Path $RepoDir 'CMakePresets.json'
-$AppName     = 'ImageCuller 2'
-$ExeName     = 'ImageCuller2.exe'
+$AppName     = 'MoveCopyScrap'
+$ExeName     = 'MoveCopyScrap.exe'
 
 # The lowest .NET major version the project's TargetFramework can build against.
 $MinDotnetMajor = 8

@@ -1,7 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Numerics;
-using ImageCuller2.Models;
-using ImageCuller2.Services;
+using MoveCopyScrap.Models;
+using MoveCopyScrap.Services;
 using Microsoft.UI;
 using Microsoft.UI.Input;
 using Microsoft.UI.Windowing;
@@ -15,7 +15,7 @@ using Windows.Storage.Pickers;
 using Windows.System;
 using WinRT.Interop;
 
-namespace ImageCuller2;
+namespace MoveCopyScrap;
 
 public sealed partial class MainWindow : Window
 {
@@ -40,7 +40,7 @@ public sealed partial class MainWindow : Window
 
         _thumbnails = new ThumbnailService(DispatcherQueue);
 
-        Title = "ImageCuller 2";
+        Title = "MoveCopyScrap";
         ConfigureWindow();
 
         Filmstrip.ItemsSource = _items;
@@ -99,7 +99,7 @@ public sealed partial class MainWindow : Window
     /// </summary>
     private void ApplyAppIcon()
     {
-        string iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", "ImageCuller.ico");
+        string iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", "MoveCopyScrap.ico");
         if (!File.Exists(iconPath)) return;
 
         try { _appWindow?.SetIcon(iconPath); }

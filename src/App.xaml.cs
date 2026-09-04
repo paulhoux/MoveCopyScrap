@@ -1,6 +1,6 @@
 using Microsoft.UI.Xaml;
 
-namespace ImageCuller2;
+namespace MoveCopyScrap;
 
 /// <summary>
 /// Application entry point. The app is unpackaged (WindowsPackageType=None), so the
@@ -25,7 +25,7 @@ public partial class App : Application
     private static void OnUnhandledException(object sender, Microsoft.UI.Xaml.UnhandledExceptionEventArgs e)
     {
         // A bad file or a codec hiccup should never take the whole app down mid-cull.
-        System.Diagnostics.Debug.WriteLine($"[ImageCuller2] Unhandled: {e.Exception}");
+        System.Diagnostics.Debug.WriteLine($"[MoveCopyScrap] Unhandled: {e.Exception}");
         e.Handled = true;
     }
 }

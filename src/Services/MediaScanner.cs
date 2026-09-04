@@ -1,7 +1,7 @@
-using ImageCuller2.Helpers;
-using ImageCuller2.Models;
+using MoveCopyScrap.Helpers;
+using MoveCopyScrap.Models;
 
-namespace ImageCuller2.Services;
+namespace MoveCopyScrap.Services;
 
 /// <summary>Enumerates the supported media files in a folder (non-recursive).</summary>
 public static class MediaScanner

@@ -1,4 +1,4 @@
-# ImageCuller 2
+# MoveCopyScrap
 
 A fast photo/video culling tool for Windows. Point it at a folder, fly through the images
 with the arrow keys, hit **Space** on the keepers, then copy, move or delete the marked set
@@ -21,7 +21,7 @@ Double-click **`build.bat`**, or from a terminal:
 ```
 
 It installs whatever is missing, builds, installs into `dist\`, and puts an
-**ImageCuller 2** entry in your Start Menu. Nothing needs to be set up first beyond a
+**MoveCopyScrap** entry in your Start Menu. Nothing needs to be set up first beyond a
 normal Windows install with `winget` available.
 
 | Switch | Effect |
@@ -87,7 +87,7 @@ SDK is enough for a command-line build.
 ```powershell
 cmake --preset vs2022-x64
 cmake --build --preset release
-cmake --install build --prefix C:\Apps\ImageCuller2
+cmake --install build --prefix C:\Apps\MoveCopyScrap
 ```
 
 or without presets:
@@ -95,7 +95,7 @@ or without presets:
 ```powershell
 cmake -S . -B build -G "Visual Studio 17 2022" -A x64
 cmake --build build --config Release
-cmake --install build --prefix C:\Apps\ImageCuller2
+cmake --install build --prefix C:\Apps\MoveCopyScrap
 ```
 
 Run it straight from the build tree with:
@@ -122,17 +122,17 @@ Useful cache variables:
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `IC_RUNTIME_IDENTIFIER` | `win-x64` | `win-x64` or `win-arm64` |
-| `IC_SELF_CONTAINED` | `ON` | Bundle the .NET runtime **and** the Windows App SDK so the output folder runs anywhere |
-| `IC_BUILD_DRIVER` | `auto` | `auto`, `dotnet`, or `msbuild` |
-| `IC_DOTNET_EXECUTABLE` | auto | Override which `dotnet` is used |
-| `IC_MSBUILD_EXECUTABLE` | auto | Override which `MSBuild.exe` is used |
-| `IC_PARALLEL_BUILD` | `ON` | Build in parallel |
-| `IC_INSTALL_BINDIR` | `bin` | Install subdirectory for the app |
+| `MCS_RUNTIME_IDENTIFIER` | `win-x64` | `win-x64` or `win-arm64` |
+| `MCS_SELF_CONTAINED` | `ON` | Bundle the .NET runtime **and** the Windows App SDK so the output folder runs anywhere |
+| `MCS_BUILD_DRIVER` | `auto` | `auto`, `dotnet`, or `msbuild` |
+| `MCS_DOTNET_EXECUTABLE` | auto | Override which `dotnet` is used |
+| `MCS_MSBUILD_EXECUTABLE` | auto | Override which `MSBuild.exe` is used |
+| `MCS_PARALLEL_BUILD` | `ON` | Build in parallel |
+| `MCS_INSTALL_BINDIR` | `bin` | Install subdirectory for the app |
 
 ### Without CMake
 
-`src/ImageCuller2.csproj` is a perfectly ordinary SDK-style project. Open it (or the
+`src/MoveCopyScrap.csproj` is a perfectly ordinary SDK-style project. Open it (or the
 solution CMake generates) in Visual Studio 2022, set the platform to **x64**, and press F5.
 
 ---
@@ -161,7 +161,7 @@ thumbnail jumps straight there.
 Marks are stored per folder in:
 
 ```
-%LOCALAPPDATA%\ImageCuller2\marks\<folder-name>-<hash>.json
+%LOCALAPPDATA%\MoveCopyScrap\marks\<folder-name>-<hash>.json
 ```
 
 Nothing is ever written into your picture folders, so read-only and network locations work
@@ -188,23 +188,42 @@ Microsoft Store; without them those files fall back to a placeholder.
 
 ## How it is put together
 
+Everything checked in is a source file; everything generated lives under `build/` or
+`dist/`, both of which are ignored by git and can be deleted at any time.
+
 ```
-CMakeLists.txt              CMake driver (configure / build / install / cpack)
-CMakePresets.json           vs2022-x64, vs2022-arm64, ninja-x64
+build.bat / build.ps1        One-command build: fetch prerequisites, build, install, shortcut
+CMakeLists.txt               CMake driver (configure / build / install / cpack)
+CMakePresets.json            vs2022-x64, vs2022-arm64, ninja-x64
+Directory.Build.props        Redirects obj\ and bin\ out of src\ and into build\
+
+assets/
+  MoveCopyScrap.ico          App icon: 16/24/32/48/64/128/256 px
+
+cmake/
+  PurgeStaleAppHost.cmake    Guards against the SDK's stale-apphost gap
+
 src/
-  ImageCuller2.csproj       SDK-style WinUI 3 project, unpackaged, self-contained
-  app.manifest              PerMonitorV2 DPI, long paths, UTF-8
-  App.xaml[.cs]             Dark theme, palette and command-bar styles
-  MainWindow.xaml[.cs]      Title bar, command bar, filmstrip, dialogs, keyboard
-  Controls/CarouselView.cs  The carousel
-  Models/MediaItem.cs       One file: marks, thumbnail, aspect ratio (INotifyPropertyChanged)
+  MoveCopyScrap.csproj       SDK-style WinUI 3 project, unpackaged, self-contained
+  app.manifest               PerMonitorV2 DPI, long paths
+  App.xaml[.cs]              Dark theme, palette and command-bar styles
+  MainWindow.xaml[.cs]       Title bar, command bar, filmstrip, dialogs, keyboard
+  Controls/CarouselView.cs   The carousel
+  Models/MediaItem.cs        One file: marks, thumbnail, aspect ratio (INotifyPropertyChanged)
   Services/
-    MediaScanner.cs         Folder enumeration + Explorer-style natural sort
-    ThumbnailService.cs     Background thumbnails, bounded concurrency
-    ImageLoader.cs          Full-size decode-to-display-size, LRU cache
-    MarkStore.cs            Debounced atomic JSON mark state
-    FileOperations.cs       Copy / move / recycle-bin delete
+    MediaScanner.cs          Folder enumeration + Explorer-style natural sort
+    ThumbnailService.cs      Background thumbnails, bounded concurrency
+    ImageLoader.cs           Decode-to-display-size, LRU cache
+    MarkStore.cs             Debounced atomic JSON mark state
+    FileOperations.cs        Copy / move / recycle-bin delete
   Helpers/NaturalComparer.cs
+
+build/                       ── generated ──────────────────────────────────
+  CMakeCache.txt, *.vcxproj  CMake's own configure output
+  obj/MoveCopyScrap/         MSBuild intermediates, NuGet restore assets
+  bin/MoveCopyScrap/         MSBuild output
+  publish/<Config>/          The self-contained app as built
+dist/bin/                    The installed app (cmake --install)
 ```
 
 ### Performance notes
@@ -272,7 +291,7 @@ registered"* — the 2005 namespace defines `<dpiAware>`, only the 2016 one defi
 
 Note that after fixing `app.manifest` you may still get the old error: the .NET SDK does
 not treat `app.manifest` as an input to apphost creation, so `obj/.../apphost.exe` — the
-stub that becomes `ImageCuller2.exe` — keeps the previous manifest while every other part
+stub that becomes `MoveCopyScrap.exe` — keeps the previous manifest while every other part
 of the build correctly rebuilds. `cmake/PurgeStaleAppHost.cmake` runs before every build to
 delete an apphost older than `app.manifest`; if you ever need to force it by hand:
 
