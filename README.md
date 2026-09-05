@@ -32,6 +32,8 @@ normal Windows install with `winget` available.
 | `-NoInstall` | Build only; leave the output in `build\publish\` |
 | `-NoShortcut` | Install, but create no Start Menu entry |
 | `-DesktopShortcut` | Also drop a shortcut on the desktop |
+| `-SingleFile` | Publish one self-extracting .exe instead of a folder |
+| `-Installer` | Also build a Setup .exe with Inno Setup (fetched via winget) |
 | `-Preset ninja-x64` | Force a particular CMake preset |
 | `-NonInteractive` | Never prompt, never pause. For CI |
 
@@ -104,7 +106,49 @@ Run it straight from the build tree with:
 cmake --build build --config Release --target run
 ```
 
-`cpack -G ZIP --config build\CPackConfig.cmake` produces a redistributable zip.
+### Making something to hand out
+
+An installer, which is the friendliest thing to send someone:
+
+```powershell
+.\build.bat -Installer
+```
+
+Inno Setup is fetched with winget if it is missing, and
+`build\installer\MoveCopyScrap-1.0.0-Setup.exe` comes out the other end. It installs
+per-user into `%LOCALAPPDATA%\Programs` with no UAC prompt at all (the wizard still
+offers all-users), adds Start Menu and optional desktop shortcuts, registers in Add/Remove
+Programs, and on uninstall asks whether to keep your saved marks. The version comes from
+the .exe itself, so nothing has to be kept in step with CMake by hand.
+
+Requires Inno Setup 6.3 or newer, which is what winget installs.
+
+Or a plain zip, if you would rather not have anything installed:
+
+```powershell
+cpack -G ZIP --config build\CPackConfig.cmake
+```
+
+produces `MoveCopyScrap-1.0.0-win-x64.zip`: one folder, with `MoveCopyScrap.exe` and the
+README right at the top. Unzip anywhere and run it — nothing to install.
+
+For a single file instead of a folder of ~400:
+
+```powershell
+.\build.bat -SingleFile
+```
+
+or, by hand — note the `MCS_` prefix, CMake ignores a mistyped `-D` in silence:
+
+```powershell
+cmake --preset vs2022-x64 -DMCS_SINGLE_FILE=ON
+cmake --build --preset release
+```
+
+That publishes one self-extracting `MoveCopyScrap.exe` of about the same total size. The
+Windows App SDK supports this for unpackaged, self-contained apps, which is what this is.
+The trade-off is the first launch: everything, native DLLs included, is unpacked to a
+per-version folder under `%TEMP%` before the app starts. Subsequent launches reuse it.
 
 #### What CMake actually does
 
@@ -128,7 +172,8 @@ Useful cache variables:
 | `MCS_DOTNET_EXECUTABLE` | auto | Override which `dotnet` is used |
 | `MCS_MSBUILD_EXECUTABLE` | auto | Override which `MSBuild.exe` is used |
 | `MCS_PARALLEL_BUILD` | `ON` | Build in parallel |
-| `MCS_INSTALL_BINDIR` | `bin` | Install subdirectory for the app |
+| `MCS_SINGLE_FILE` | `OFF` | Publish one self-extracting .exe instead of a folder |
+| `MCS_INSTALL_BINDIR` | `.` | Install subdirectory for the app; `.` keeps it flat |
 
 ### Without CMake
 
@@ -203,6 +248,9 @@ assets/
 cmake/
   PurgeStaleAppHost.cmake    Guards against the SDK's stale-apphost gap
 
+installer/
+  MoveCopyScrap.iss          Inno Setup script; payload and output passed in by build.ps1
+
 src/
   MoveCopyScrap.csproj       SDK-style WinUI 3 project, unpackaged, self-contained
   app.manifest               PerMonitorV2 DPI, long paths
@@ -223,6 +271,7 @@ build/                       ── generated ───────────�
   obj/MoveCopyScrap/         MSBuild intermediates, NuGet restore assets
   bin/MoveCopyScrap/         MSBuild output
   publish/<Config>/          The self-contained app as built
+  installer/                 The compiled Setup .exe
 dist/bin/                    The installed app (cmake --install)
 ```
 

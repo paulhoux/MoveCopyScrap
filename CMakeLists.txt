@@ -53,8 +53,22 @@ option(MCS_SELF_CONTAINED
 
 option(MCS_PARALLEL_BUILD "Build in parallel" ON)
 
-set(MCS_INSTALL_BINDIR "bin" CACHE STRING "Install destination for the application, relative to the prefix")
-set(MCS_INSTALL_DOCDIR "share/doc/MoveCopyScrap" CACHE STRING "Install destination for documentation")
+# Deliberately flat. A portable Windows app is expected to unzip to one folder with the
+# .exe right there; burying it in bin/ next to a share/doc/ tree is a Unix habit that
+# just makes people hunt for the executable. Set these if you want the split back.
+set(MCS_INSTALL_BINDIR "." CACHE STRING "Install destination for the application, relative to the prefix")
+set(MCS_INSTALL_DOCDIR "." CACHE STRING "Install destination for documentation")
+
+# Publish as ONE self-extracting .exe instead of a folder of ~400 files.
+#
+# Supported by the Windows App SDK for unpackaged, self-contained apps - see
+# Microsoft.WindowsAppSDK.SingleFile.targets, which hard-errors unless EnableMsixTooling
+# is on, WindowsPackageType is None and IncludeAllContentForSelfExtract is true. This
+# project already satisfies all three.
+#
+# The cost is a slower first launch: everything, native DLLs included, is unpacked to a
+# per-version folder under %TEMP% before the app starts.
+option(MCS_SINGLE_FILE "Publish as a single self-extracting executable" OFF)
 
 if(MCS_RUNTIME_IDENTIFIER STREQUAL "win-arm64")
     set(MCS_MSBUILD_PLATFORM "ARM64")
@@ -229,7 +243,39 @@ else()
 endif()
 message(STATUS "MoveCopyScrap: RID         = ${MCS_RUNTIME_IDENTIFIER} (Platform=${MCS_MSBUILD_PLATFORM})")
 message(STATUS "MoveCopyScrap: self-contained = ${MCS_SELF_CONTAINED_VALUE}")
+message(STATUS "MoveCopyScrap: single file    = ${MCS_SINGLE_FILE}")
 message(STATUS "MoveCopyScrap: publish root   = ${MCS_PUBLISH_ROOT}")
+
+# ---------------------------------------------------------------------------
+# Catch mistyped -D options.
+#
+# CMake accepts any -D<name>=<value> and records it whether or not the project
+# ever reads it, so a typo like -DCS_SINGLE_FILE=ON configures perfectly
+# cleanly and silently does nothing. CMake does report unused variables, but
+# only at the very end of a long configure log where it is easy to miss.
+#
+# A cache entry still typed UNINITIALIZED at this point is one that came from
+# the command line and was never declared by this project.
+# ---------------------------------------------------------------------------
+
+get_cmake_property(_mcs_cache_vars CACHE_VARIABLES)
+set(_mcs_unused "")
+foreach(_mcs_var IN LISTS _mcs_cache_vars)
+    get_property(_mcs_var_type CACHE "${_mcs_var}" PROPERTY TYPE)
+    if(_mcs_var_type STREQUAL "UNINITIALIZED")
+        list(APPEND _mcs_unused "${_mcs_var}")
+    endif()
+endforeach()
+
+if(_mcs_unused)
+    string(REPLACE ";" "\n    " _mcs_unused_text "${_mcs_unused}")
+    message(WARNING
+        "Set on the command line but not used by MoveCopyScrap:\n"
+        "    ${_mcs_unused_text}\n"
+        "Check the spelling -- every option this project defines starts with MCS_:\n"
+        "    MCS_SINGLE_FILE  MCS_SELF_CONTAINED  MCS_RUNTIME_IDENTIFIER  MCS_BUILD_DRIVER\n"
+        "    MCS_PARALLEL_BUILD  MCS_INSTALL_BINDIR  MCS_INSTALL_DOCDIR")
+endif()
 
 # ---------------------------------------------------------------------------
 # Build
@@ -248,6 +294,16 @@ set(MCS_COMMON_PROPS
     "-p:Version=${PROJECT_VERSION}"
     "-p:FileVersion=${PROJECT_VERSION}.0"
     "-p:InformationalVersion=${PROJECT_VERSION}")
+
+if(MCS_SINGLE_FILE)
+    list(APPEND MCS_COMMON_PROPS
+        "-p:PublishSingleFile=true"
+        "-p:IncludeAllContentForSelfExtract=true"
+        # Without this the Windows App SDK warns that
+        # MICROSOFT_WINDOWSAPPRUNTIME_BASE_DIRECTORY must be set before program entry.
+        # App.xaml.cs sets it from a [ModuleInitializer] as well, belt and braces.
+        "-p:WindowsAppSdkUndockedRegFreeWinRTInitialize=true")
+endif()
 
 if(_mcs_driver STREQUAL "dotnet")
     # NOTE: `dotnet publish` does not accept MSBuild's bare -m switch, so parallelism
@@ -337,6 +393,12 @@ add_custom_target(clean-publish
 # `cmake --install build --prefix ...` works as expected.
 # ---------------------------------------------------------------------------
 
+if(MCS_INSTALL_BINDIR STREQUAL "." OR MCS_INSTALL_BINDIR STREQUAL "")
+    set(_mcs_bin_dest "\${CMAKE_INSTALL_PREFIX}")
+else()
+    set(_mcs_bin_dest "\${CMAKE_INSTALL_PREFIX}/${MCS_INSTALL_BINDIR}")
+endif()
+
 install(CODE "
 set(_mcs_src \"${MCS_PUBLISH_DIR}\")
 if(NOT EXISTS \"\${_mcs_src}/MoveCopyScrap.exe\")
@@ -346,7 +408,7 @@ if(NOT EXISTS \"\${_mcs_src}/MoveCopyScrap.exe\")
 endif()
 message(STATUS \"Installing MoveCopyScrap from \${_mcs_src}\")
 file(INSTALL
-     DESTINATION \"\${CMAKE_INSTALL_PREFIX}/${MCS_INSTALL_BINDIR}\"
+     DESTINATION \"${_mcs_bin_dest}\"
      TYPE DIRECTORY
      FILES \"\${_mcs_src}/\"
      USE_SOURCE_PERMISSIONS)

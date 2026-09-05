@@ -39,6 +39,16 @@
 .PARAMETER DesktopShortcut
     Also put a shortcut on the desktop.
 
+.PARAMETER SingleFile
+    Publish one self-extracting .exe instead of a folder of ~400 files. Costs a
+    slower first launch: everything is unpacked to %TEMP% before the app starts.
+
+.PARAMETER Installer
+    Also compile installer\MoveCopyScrap.iss into a Setup .exe with Inno Setup,
+    installing Inno Setup from winget if it is missing. Off by default: it
+    recompresses the whole ~180 MB payload, which is not something you want on
+    every build.
+
 .PARAMETER Run
     Launch the application when the build finishes.
 
@@ -62,6 +72,8 @@ param(
     [switch] $NoInstall,
     [switch] $NoShortcut,
     [switch] $DesktopShortcut,
+    [switch] $SingleFile,
+    [switch] $Installer,
     [switch] $Run,
     [switch] $NonInteractive
 )
@@ -79,6 +91,7 @@ $MinDotnetMajor = 8
 
 # Declared up front: StrictMode errors on a read of an undefined variable.
 $script:CMakeExe = $null
+$script:InstallerPath = $null
 
 # ================================================================
 # Output
@@ -422,6 +435,92 @@ function Read-Choice {
 }
 
 # ================================================================
+# Inno Setup
+# ================================================================
+
+# Read a registry key's default value, or $null.
+#
+# Not `(Get-ItemProperty $path).'(default)'`: under StrictMode that throws
+# rather than yielding $null both when the key is absent and when it exists
+# with no default set. Both are normal states here.
+function Get-RegistryDefault {
+    param([Parameter(Mandatory)][string] $Path)
+
+    try {
+        $value = (Get-Item -LiteralPath $Path -ErrorAction Stop).GetValue('')
+        if ([string]::IsNullOrWhiteSpace($value)) { return $null }
+        return "$value"
+    }
+    catch { return $null }
+}
+
+# The executable registered to open a file extension. Callers must still check
+# that it is the program they wanted -- see Get-InnoCompiler.
+function Get-AssociatedExe {
+    param([Parameter(Mandatory)][string] $Extension)
+
+    $progId = Get-RegistryDefault "Registry::HKEY_CLASSES_ROOT\$Extension"
+    if (-not $progId) { return $null }
+
+    $command = Get-RegistryDefault "Registry::HKEY_CLASSES_ROOT\$progId\shell\open\command"
+    if (-not $command) { return $null }
+
+    if ($command -match '^\s*"([^"]+)"') { return $Matches[1] }
+    if ($command -match '^\s*(\S+)')     { return $Matches[1] }
+    return $null
+}
+
+# The Inno Setup command-line compiler, or $null.
+#
+# Deliberately not the .iss association alone: editors such as VS Code and
+# Notepad++ commonly claim .iss, and deriving ISCC.exe from whatever owns it
+# produces a path that fails confusingly at compile time without ever offering
+# to install Inno Setup. Every candidate here is confirmed by the presence of
+# ISCC.exe itself.
+function Get-InnoCompiler {
+    $onPath = Get-Command 'ISCC.exe' -ErrorAction Ignore
+    if ($onPath) { return $onPath.Source }
+
+    $uninstallRoots = @(
+        'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall',
+        'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall',
+        'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall')
+
+    foreach ($root in $uninstallRoots) {
+        if (-not (Test-Path $root)) { continue }
+        # Each hop null-guarded: a subkey may be unreadable or carry neither
+        # DisplayName nor InstallLocation, and StrictMode throws on all three.
+        $entries = Get-ChildItem $root -ErrorAction Ignore |
+                   ForEach-Object { Get-ItemProperty $_.PSPath -ErrorAction Ignore } |
+                   Where-Object { $_ -and $_.PSObject.Properties['DisplayName'] } |
+                   Where-Object { $_.DisplayName -like 'Inno Setup*' }
+
+        foreach ($entry in $entries) {
+            if (-not $entry.PSObject.Properties['InstallLocation'] -or -not $entry.InstallLocation) { continue }
+            $candidate = Join-Path $entry.InstallLocation 'ISCC.exe'
+            if (Test-Path -LiteralPath $candidate) { return $candidate }
+        }
+    }
+
+    foreach ($base in @(${env:ProgramFiles(x86)}, $env:ProgramFiles)) {
+        if (-not $base) { continue }
+        foreach ($version in @('Inno Setup 6', 'Inno Setup 5')) {
+            $candidate = Join-Path $base "$version\ISCC.exe"
+            if (Test-Path -LiteralPath $candidate) { return $candidate }
+        }
+    }
+
+    $associated = Get-AssociatedExe '.iss'
+    if ($associated -and (Test-Path -LiteralPath $associated)) {
+        $candidate = Join-Path (Split-Path -Parent $associated) 'ISCC.exe'
+        if (Test-Path -LiteralPath $candidate) { return $candidate }
+        Write-Info ".iss is associated with $associated, which is not Inno Setup. Ignoring it."
+    }
+
+    return $null
+}
+
+# ================================================================
 # Shortcuts
 # ================================================================
 
@@ -455,6 +554,8 @@ try {
     Write-Host "$AppName -- build" -ForegroundColor White
     Write-Info "Repository:    $RepoDir"
     Write-Info "Configuration: $Configuration"
+    if ($SingleFile) { Write-Info 'Single file:   ON' }
+    if ($Installer)  { Write-Info 'Installer:     ON' }
 
     if (-not (Test-Path -LiteralPath (Join-Path $RepoDir 'CMakeLists.txt'))) {
         throw "CMakeLists.txt not found next to this script. Run build.bat from the repository root."
@@ -550,7 +651,12 @@ try {
         }
 
         Write-Step 'Configure'
-        & $script:CMakeExe --preset $Preset
+        # Passed explicitly every time rather than left to the cache, so that the
+        # switch is what decides and a stale value from an earlier configure cannot
+        # quietly persist. (Spelling the -D by hand is easy to get wrong: CMake
+        # accepts any unknown -D silently, so a typo just does nothing.)
+        $singleFileValue = if ($SingleFile) { 'ON' } else { 'OFF' }
+        & $script:CMakeExe --preset $Preset "-DMCS_SINGLE_FILE=$singleFileValue"
         if ($LASTEXITCODE -ne 0) { throw "CMake configuration failed." }
 
         Write-Step "Build ($Configuration)"
@@ -575,8 +681,12 @@ try {
         if ($LASTEXITCODE -ne 0) { throw "Install failed." }
 
         if ($paths.InstallPrefix) {
-            $candidate = Join-Path $paths.InstallPrefix "bin\$ExeName"
-            if (Test-Path -LiteralPath $candidate) { $installedExe = $candidate }
+            # The install layout is flat by default, but MCS_INSTALL_BINDIR can put the app
+            # in a subfolder, so look in both rather than assuming.
+            foreach ($relative in @($ExeName, "bin\$ExeName")) {
+                $candidate = Join-Path $paths.InstallPrefix $relative
+                if (Test-Path -LiteralPath $candidate) { $installedExe = $candidate; break }
+            }
         }
         if (-not $installedExe) {
             Write-Warning "Installed, but $ExeName was not found under $($paths.InstallPrefix). Skipping the shortcut."
@@ -603,6 +713,46 @@ try {
         }
     }
 
+    # --- Installer ---
+    if ($Installer) {
+        Write-Step 'Inno Setup'
+
+        $iscc = Get-InnoCompiler
+        if (-not $iscc) {
+            Write-Info 'Inno Setup not found. Installing...'
+            Invoke-Winget -Id 'JRSoftware.InnoSetup' -ExtraArgs @('--override', '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART')
+            $iscc = Get-InnoCompiler
+            if (-not $iscc) {
+                throw "Inno Setup was installed but ISCC.exe could not be located. Install it by hand and rerun."
+            }
+        }
+        Write-Ok "Using Inno Setup compiler at: $iscc"
+
+        if (-not $installedExe) {
+            throw "Nothing to package: $ExeName was not found. Run without -NoInstall so the app is installed first."
+        }
+
+        $issFile = Join-Path $RepoDir "installer\$AppName.iss"
+        if (-not (Test-Path -LiteralPath $issFile)) { throw "Installer script not found at $issFile" }
+
+        # Whatever folder the app actually ended up in - dist\ normally, or the
+        # publish folder under -NoInstall - rather than a path duplicated here.
+        $payloadDir = Split-Path -Parent $installedExe
+        $outDir     = Join-Path $RepoDir 'build\installer'
+
+        Write-Step 'Compile installer'
+        Write-Info "Packaging $payloadDir"
+        & $iscc "/DSourceDir=$payloadDir" "/DOutputDir=$outDir" $issFile
+        if ($LASTEXITCODE -ne 0) { throw "Failed to compile the installer." }
+
+        $setup = @(Get-ChildItem -LiteralPath $outDir -Filter '*.exe' -File -ErrorAction Ignore |
+                   Sort-Object LastWriteTime -Descending | Select-Object -First 1)
+        if ($setup.Count -gt 0) {
+            $script:InstallerPath = $setup[0].FullName
+            Write-Ok "Installer: $script:InstallerPath"
+        }
+    }
+
     # --- Summary ---
     Write-Host "`nDone." -ForegroundColor Green
     if ($installedExe) {
@@ -612,6 +762,9 @@ try {
         }
     }
     Write-Host "  Build:       $($paths.BinaryDir)" -ForegroundColor Green
+    if ($script:InstallerPath) {
+        Write-Host "  Installer:   $script:InstallerPath" -ForegroundColor Green
+    }
 
     if ($Run -and $installedExe) {
         Write-Step 'Run'
