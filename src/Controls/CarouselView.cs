@@ -399,7 +399,8 @@ public sealed class CarouselView : Grid
     {
         bool marked = slot.Item?.IsMarked == true;
         slot.MarkBadge.Opacity = marked ? 1 : 0;
-        slot.Frame.BorderBrush = marked ? MarkedBorderBrush : NormalBorderBrush;
+        slot.Frame.BorderBrush = marked ? slot.Item!.GroupBrush : NormalBorderBrush;
+        if (marked) slot.MarkBadge.Background = slot.Item!.GroupBrush;
         slot.Frame.BorderThickness = new Thickness(marked ? 3 : 1);
     }
 

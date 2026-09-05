@@ -63,7 +63,13 @@
                 </Grid>
 
                 <Grid Grid.Row="1" Height="52" Padding="10,0">
-                    <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <ScrollViewer x:Name="CommandScroller" HorizontalScrollBarVisibility="Hidden" HorizontalScrollMode="Enabled"
+                                  VerticalScrollMode="Disabled" VerticalScrollBarVisibility="Disabled">
+                    <StackPanel x:Name="CommandItems" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
                         <Button x:Name="OpenFolderButton" Style="{StaticResource CommandButtonStyle}"
                                 Click="OnOpenFolderClick" ToolTipService.ToolTip="Open folder (Ctrl+O)">
                             <StackPanel Orientation="Horizontal" Spacing="8">
@@ -87,6 +93,15 @@
                                 Margin="4,0,6,0" Background="#1FFFFFFF" VerticalAlignment="Center">
                             <TextBlock x:Name="MarkCountText" Text="0 marked" FontSize="12" Opacity="0.85" />
                         </Border>
+
+                        <StackPanel x:Name="GroupsBar" Orientation="Horizontal" Spacing="6"
+                                    VerticalAlignment="Center" Visibility="Collapsed">
+                            <StackPanel x:Name="GroupPills" Orientation="Horizontal" Spacing="6" />
+                            <Button x:Name="AddGroupButton" Style="{StaticResource CommandButtonStyle}"
+                                    Click="OnAddGroupClick" ToolTipService.ToolTip="Add group">
+                                <FontIcon Glyph="&#xE710;" FontSize="15" />
+                            </Button>
+                        </StackPanel>
 
                         <Border Width="1" Height="22" Margin="6,0"
                                 Background="{StaticResource AppSubtleBorderBrush}" />
@@ -133,9 +148,17 @@
                                 <TextBlock Text="Delete…" />
                             </StackPanel>
                         </Button>
+                        <Button x:Name="OrganiseButton" Style="{StaticResource CommandButtonStyle}"
+                                Click="OnOrganiseClick" Visibility="Collapsed">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <FontIcon Glyph="&#xE8B7;" FontSize="15" />
+                                <TextBlock Text="Organise..." />
+                            </StackPanel>
+                        </Button>
                     </StackPanel>
+                    </ScrollViewer>
 
-                    <StackPanel Orientation="Horizontal" Spacing="4"
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4"
                                 HorizontalAlignment="Right" VerticalAlignment="Center">
                         <TextBlock x:Name="PositionText" Text="" FontSize="12" Opacity="0.55"
                                    VerticalAlignment="Center" Margin="0,0,10,0" />
@@ -203,7 +226,8 @@
                                     <Border BorderBrush="{StaticResource AppAccentBrush}" BorderThickness="2"
                                             CornerRadius="6" Opacity="{x:Bind SelectionOpacity, Mode=OneWay}" />
 
-                                    <Border Background="{StaticResource AppMarkBrush}" CornerRadius="9"
+                                    <Border Background="{x:Bind GroupBrush, Mode=OneWay}" CornerRadius="9"
+                                            ToolTipService.ToolTip="{x:Bind GroupName, Mode=OneWay}"
                                             Width="18" Height="18" Margin="4"
                                             HorizontalAlignment="Right" VerticalAlignment="Top"
                                             Visibility="{x:Bind MarkBadgeVisibility, Mode=OneWay}">

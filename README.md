@@ -10,6 +10,39 @@ in one go.
 * Background thumbnail generation, virtualized filmstrip
 * Marks survive crashes and restarts
 
+## Organising With Groups
+
+Existing marks become members of Group 1. With only one group its pill stays hidden;
+the **+** button remains available to add another. With multiple groups, click a group pill to activate it; the active
+pill has a colored outer ring. Double-click a pill to rename it, or right-click
+for rename and remove commands. Removing a group unmarks its images without
+deleting any files. Colors follow group order, so the first remaining group always
+uses the first color, including after removing groups or reopening a folder.
+
+**Space** toggles the current image in the active group. If it belongs to another
+group, Space transfers its membership to the active group. Each image belongs to
+at most one group. Number keys **1-9** (including the numeric keypad) assign the current
+image to the corresponding group and make it active, creating missing groups as needed.
+Pressing the same number again keeps the assignment; use Space to unmark. Image borders
+and thumbnail badges use the assigned group's color; the caption shows its name.
+
+With multiple groups, **Organise...** replaces Copy, Move and Delete. Choose Skip,
+Copy, Move or Delete for each group, with a destination for Copy and Move. Review
+the complete plan before confirming. The existing Copy/Move/Delete shortcuts open
+Organise when multiple groups exist. Single-group file commands keep their original
+behavior.
+
+Successfully moved or deleted files lose their assignments. Copied, skipped and
+failed files keep their marks and groups. Groups, names, the active group and chosen actions/destinations are
+saved per folder, including when the Organise dialog is cancelled. Cancel never
+executes file operations. Destination filename collisions receive a numbered suffix.
+
+Run the isolated group persistence checks with:
+
+```powershell
+dotnet run --project tests/GroupStateChecks/GroupStateChecks.csproj
+```
+
 ---
 
 ## Quick start

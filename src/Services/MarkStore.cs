@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using MoveCopyScrap.Models;
 
 namespace MoveCopyScrap.Services;
 
@@ -20,6 +21,10 @@ public sealed class MarkStore : IDisposable
     private readonly string _stateFile;
     private readonly string _folder;
     private readonly HashSet<string> _marked = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, string> _assignments = new(StringComparer.OrdinalIgnoreCase);
+    private List<MarkGroup> _groups = new() { new MarkGroup() };
+    private string? _activeGroupId;
+    private readonly object _writeSync = new();
     private readonly Timer _timer;
     private readonly object _sync = new();
     private bool _dirty;
@@ -41,16 +46,18 @@ public sealed class MarkStore : IDisposable
     public int Count { get { lock (_sync) return _marked.Count; } }
 
     /// <summary>Opens (or creates) the mark state for a folder and loads any previous marks.</summary>
-    public static async Task<MarkStore> OpenAsync(string folder)
+    public static Task<MarkStore> OpenAsync(string folder) => OpenAsync(folder, StateDirectory);
+
+    internal static async Task<MarkStore> OpenAsync(string folder, string stateDirectory)
     {
-        Directory.CreateDirectory(StateDirectory);
+        Directory.CreateDirectory(stateDirectory);
 
         string normalized = Normalize(folder);
         string hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(normalized))).ToLowerInvariant()[..16];
         string leaf = Sanitize(Path.GetFileName(normalized));
         if (leaf.Length == 0) leaf = "root";
 
-        var store = new MarkStore(folder, Path.Combine(StateDirectory, $"{leaf}-{hash}.json"));
+        var store = new MarkStore(folder, Path.Combine(stateDirectory, $"{leaf}-{hash}.json"));
         await store.LoadAsync().ConfigureAwait(false);
         return store;
     }
@@ -68,6 +75,15 @@ public sealed class MarkStore : IDisposable
             lock (_sync)
             {
                 foreach (var name in state.Marked) _marked.Add(name);
+                if (state.Groups is { Count: > 0 })
+                    _groups = state.Groups.Where(g => !string.IsNullOrWhiteSpace(g.Id))
+                        .DistinctBy(g => g.Id).ToList();
+                if (_groups.Count == 0) _groups.Add(new MarkGroup());
+                _activeGroupId = state.ActiveGroupId;
+                var assignments = new Dictionary<string, string>(state.Assignments, StringComparer.OrdinalIgnoreCase);
+                foreach (var name in _marked)
+                    _assignments[name] = assignments.TryGetValue(name, out var id) &&
+                        _groups.Any(g => g.Id == id) ? id : _groups[0].Id;
             }
         }
         catch (Exception ex)
@@ -81,11 +97,42 @@ public sealed class MarkStore : IDisposable
         lock (_sync) return _marked.Contains(fileName);
     }
 
+    public List<MarkGroup> Groups { get { lock (_sync) return _groups.Select(g => g.Clone()).ToList(); } }
+    public string ActiveGroupId { get { lock (_sync) return _groups.Any(g => g.Id == _activeGroupId) ? _activeGroupId! : _groups[0].Id; } }
+    public string? GroupFor(string fileName)
+    {
+        lock (_sync) return _assignments.GetValueOrDefault(fileName);
+    }
+
+    public void SaveGroups(IEnumerable<MarkGroup> groups, string activeId)
+    {
+        lock (_sync)
+        {
+            _groups = groups.Select(g => g.Clone()).ToList();
+            _activeGroupId = activeId;
+            _dirty = true;
+        }
+        ScheduleSave();
+    }
+
+    public void Assign(string fileName, string? groupId)
+    {
+        lock (_sync)
+        {
+            if (groupId is null) { _marked.Remove(fileName); _assignments.Remove(fileName); }
+            else { _marked.Add(fileName); _assignments[fileName] = groupId; }
+            _dirty = true;
+        }
+        ScheduleSave();
+    }
+
     public void Set(string fileName, bool marked)
     {
         lock (_sync)
         {
             bool changed = marked ? _marked.Add(fileName) : _marked.Remove(fileName);
+            if (marked) _assignments.TryAdd(fileName, _groups[0].Id);
+            else _assignments.Remove(fileName);
             if (!changed) return;
             _dirty = true;
         }
@@ -97,7 +144,7 @@ public sealed class MarkStore : IDisposable
         bool changed = false;
         lock (_sync)
         {
-            foreach (var name in fileNames) changed |= _marked.Remove(name);
+            foreach (var name in fileNames) { changed |= _marked.Remove(name); _assignments.Remove(name); }
             if (!changed) return;
             _dirty = true;
         }
@@ -110,6 +157,7 @@ public sealed class MarkStore : IDisposable
         {
             if (_marked.Count == 0) return;
             _marked.Clear();
+            _assignments.Clear();
             _dirty = true;
         }
         ScheduleSave();
@@ -123,6 +171,7 @@ public sealed class MarkStore : IDisposable
         {
             int before = _marked.Count;
             _marked.IntersectWith(keep);
+            foreach (var name in _assignments.Keys.Where(n => !keep.Contains(n)).ToList()) _assignments.Remove(name);
             if (_marked.Count == before) return;
             _dirty = true;
         }
@@ -144,6 +193,11 @@ public sealed class MarkStore : IDisposable
     /// <summary>Writes the state immediately (also called on shutdown).</summary>
     public void Flush()
     {
+        lock (_writeSync) FlushCore();
+    }
+
+    private void FlushCore()
+    {
         MarkState state;
         lock (_sync)
         {
@@ -153,13 +207,16 @@ public sealed class MarkStore : IDisposable
             {
                 Folder = _folder,
                 UpdatedUtc = DateTime.UtcNow,
-                Marked = _marked.OrderBy(n => n, StringComparer.OrdinalIgnoreCase).ToList()
+                Marked = _marked.OrderBy(n => n, StringComparer.OrdinalIgnoreCase).ToList(),
+                Groups = _groups.Select(g => g.Clone()).ToList(),
+                ActiveGroupId = _activeGroupId,
+                Assignments = new Dictionary<string, string>(_assignments, StringComparer.OrdinalIgnoreCase)
             };
         }
 
         try
         {
-            Directory.CreateDirectory(StateDirectory);
+            Directory.CreateDirectory(Path.GetDirectoryName(_stateFile)!);
             string temp = _stateFile + ".tmp";
             string json = JsonSerializer.Serialize(state, MarkJsonContext.Default.MarkState);
             File.WriteAllText(temp, json, Encoding.UTF8);
@@ -202,6 +259,9 @@ internal sealed class MarkState
     [JsonPropertyName("folder")] public string Folder { get; set; } = string.Empty;
     [JsonPropertyName("updatedUtc")] public DateTime UpdatedUtc { get; set; }
     [JsonPropertyName("marked")] public List<string> Marked { get; set; } = new();
+    public List<MarkGroup> Groups { get; set; } = new();
+    public string? ActiveGroupId { get; set; }
+    public Dictionary<string, string> Assignments { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 }
 
 [JsonSourceGenerationOptions(WriteIndented = true)]

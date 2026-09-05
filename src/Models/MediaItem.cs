@@ -13,6 +13,22 @@ public sealed class MediaItem : INotifyPropertyChanged
 {
     private ImageSource? _thumbnail;
     private bool _isMarked;
+    public string? GroupId { get; private set; }
+    public string GroupName { get; private set; } = "";
+    private SolidColorBrush? _groupBrush;
+    // The scanner constructs items on a worker thread; create XAML objects only when
+    // the UI assigns a group or reads the brush for display.
+    public SolidColorBrush GroupBrush => _groupBrush ??= new(Microsoft.UI.Colors.Gold);
+
+    public void SetGroup(MarkGroup? group, Windows.UI.Color color)
+    {
+        GroupId = group?.Id;
+        GroupName = group?.Name ?? "";
+        _groupBrush = new SolidColorBrush(color);
+        IsMarked = group is not null;
+        OnPropertyChanged(nameof(GroupName));
+        OnPropertyChanged(nameof(GroupBrush));
+    }
     private bool _isCurrent;
     private double _aspectRatio = 3.0 / 2.0;
     private int _rotationSteps;

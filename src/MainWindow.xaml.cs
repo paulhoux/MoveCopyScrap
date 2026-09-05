@@ -12,7 +12,6 @@ using Microsoft.UI.Xaml.Hosting;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media.Imaging;
 using Windows.Graphics;
-using Windows.Storage.Pickers;
 using Windows.System;
 using WinRT.Interop;
 
@@ -74,6 +73,8 @@ public sealed partial class MainWindow : Window
         // Only meaningful in fill mode, where the toggle is the sole visible control.
         RootGrid.PointerMoved += (_, _) => { if (_fillMode) ShowViewModeOverlay(); };
         RootGrid.SizeChanged += (_, _) => UpdateInsets();
+        TopChrome.SizeChanged += (_, _) => UpdateInsets();
+        CommandItems.LayoutUpdated += (_, _) => UpdateGroupLabelLayout();
         RootGrid.Loaded += (_, _) =>
         {
             UpdateInsets();
@@ -182,20 +183,19 @@ public sealed partial class MainWindow : Window
 
     private async Task<string?> PickFolderAsync()
     {
+        bool wasDialogOpen = _dialogOpen;
+        _dialogOpen = true;
         try
         {
-            var picker = new FolderPicker { SuggestedStartLocation = PickerLocationId.PicturesLibrary };
-            picker.FileTypeFilter.Add("*");
-            InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
-
-            var folder = await picker.PickSingleFolderAsync();
-            return folder?.Path;
+            await Task.Yield();
+            return FolderDialog.Pick(WindowNative.GetWindowHandle(this));
         }
         catch (Exception ex)
         {
             ShowStatus(InfoBarSeverity.Error, "Could not open the folder picker", ex.Message);
             return null;
         }
+        finally { _dialogOpen = wasDialogOpen; }
     }
 
     private async Task LoadFolderAsync(string folder)
@@ -207,10 +207,14 @@ public sealed partial class MainWindow : Window
 
         try
         {
-            _markStore?.Dispose();
-            _markStore = await MarkStore.OpenAsync(folder);
-
             var found = await MediaScanner.ScanAsync(folder);
+            var nextStore = await MarkStore.OpenAsync(folder);
+            _markStore?.Dispose();
+            _markStore = nextStore;
+            _groups = _markStore.Groups;
+            _activeGroupId = _markStore.ActiveGroupId;
+            for (int index = 0; index < _groups.Count; index++) _groups[index].ColorIndex = index;
+            SaveGroups();
 
             _thumbnails.Reset();
             _folder = folder;
@@ -218,7 +222,7 @@ public sealed partial class MainWindow : Window
             _items.Clear();
             foreach (var item in found)
             {
-                item.IsMarked = _markStore.IsMarked(item.FileName);
+                ApplyGroup(item, _groups.FirstOrDefault(g => g.Id == _markStore.GroupFor(item.FileName)));
                 _items.Add(item);
             }
 
@@ -323,17 +327,18 @@ public sealed partial class MainWindow : Window
     private void ToggleMark()
     {
         var item = CurrentItem;
-        if (item is null || _markStore is null) return;
+        if (item is null || _markStore is null || _busy || _dialogOpen) return;
 
-        item.IsMarked = !item.IsMarked;
-        _markStore.Set(item.FileName, item.IsMarked);
+        var group = item.GroupId == _activeGroupId ? null : _groups.First(g => g.Id == _activeGroupId);
+        ApplyGroup(item, group);
+        _markStore.Assign(item.FileName, group?.Id);
 
         Carousel.RefreshMarkVisuals();
         UpdateCommandState();
         UpdateCaption();
     }
 
-    private List<MediaItem> MarkedItems() => _items.Where(i => i.IsMarked).ToList();
+    private List<MediaItem> MarkedItems() => _items.Where(i => i.IsMarked && i.GroupId == _activeGroupId).ToList();
 
     // ---- rotation --------------------------------------------------------
 
@@ -633,8 +638,13 @@ public sealed partial class MainWindow : Window
             DefaultButton = ContentDialogButton.Close
         };
 
-        var result = await dialog.ShowAsync();
-        return result == ContentDialogResult.Primary;
+        _dialogOpen = true;
+        try
+        {
+            var result = await dialog.ShowAsync();
+            return result == ContentDialogResult.Primary;
+        }
+        finally { _dialogOpen = false; }
     }
 
     // ---- fill mode -------------------------------------------------------
@@ -807,11 +817,29 @@ public sealed partial class MainWindow : Window
 
     private void OnPreviewKeyDown(object sender, KeyRoutedEventArgs e)
     {
-        if (_busy) return;
+        if (_busy || _dialogOpen) return;
 
         bool ctrl = InputKeyboardSource
             .GetKeyStateForCurrentThread(VirtualKey.Control)
             .HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down);
+
+        int groupIndex = (int)e.Key - (int)VirtualKey.Number1;
+        if (e.Key >= VirtualKey.NumberPad1 && e.Key <= VirtualKey.NumberPad9)
+            groupIndex = (int)e.Key - (int)VirtualKey.NumberPad1;
+        if (!ctrl && groupIndex >= 0 && groupIndex < 9)
+        {
+            AssignCurrentToGroup(groupIndex);
+            e.Handled = true;
+            return;
+        }
+
+        if (_groups.Count > 1 && (e.Key == VirtualKey.Delete ||
+            (ctrl && (e.Key == VirtualKey.C || e.Key == VirtualKey.M))))
+        {
+            OnOrganiseClick(this, new RoutedEventArgs());
+            e.Handled = true;
+            return;
+        }
 
         switch (e.Key)
         {
@@ -884,6 +912,7 @@ public sealed partial class MainWindow : Window
 
     private void UpdateCommandState()
     {
+        RefreshGroups();
         int markedCount = _items.Count(i => i.IsMarked);
         bool hasMarked = markedCount > 0;
 
@@ -898,7 +927,7 @@ public sealed partial class MainWindow : Window
         RotateCcwButton.IsEnabled = rotatable;
         RotateCwButton.IsEnabled = rotatable;
 
-        bool marked = CurrentItem?.IsMarked == true;
+        bool marked = CurrentItem?.IsMarked == true && CurrentItem.GroupId == _activeGroupId;
         MarkGlyph.Glyph = marked ? GlyphStarFilled : GlyphStarOutline;
         MarkButtonText.Text = marked ? "Unmark" : "Mark";
 
@@ -919,7 +948,7 @@ public sealed partial class MainWindow : Window
             : $"{Math.Max(1, item.SizeBytes / 1024)} KB";
 
         CaptionText.Text = $"{item.FileName}    ·    {size}    ·    {item.LastWriteUtc.ToLocalTime():g}" +
-                           (item.IsMarked ? "    ·    marked" : "") +
+                           (item.IsMarked ? $"    ·    {item.GroupName}" : "") +
                            (item.PendingDiskSteps != 0 ? "    ·    rotated, saving shortly" : "");
     }
 
