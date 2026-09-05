@@ -133,6 +133,7 @@
                                         <TextBlock Text="Home / End   first / last image" Opacity="0.8" />
                                         <TextBlock Text="Space   mark or unmark" Opacity="0.8" />
                                         <TextBlock Text="F or Enter   fill the window" Opacity="0.8" />
+                                        <TextBlock Text="K   fit the whole image / fill the window" Opacity="0.8" />
                                         <TextBlock Text="Esc   leave fill mode" Opacity="0.8" />
                                         <TextBlock Text="F11   full screen" Opacity="0.8" />
                                         <TextBlock Text="Ctrl+O   open folder" Opacity="0.8" />
@@ -198,6 +199,34 @@
                 </ScrollViewer>
             </Grid>
         </Grid>
+
+        <!-- View-mode toggle. Only shown in fill mode, where all the other chrome has slid
+             away. Top margin clears the system caption buttons, which stay put. -->
+        <Border x:Name="ViewModeOverlay"
+                HorizontalAlignment="Right" VerticalAlignment="Top"
+                Margin="0,52,16,0" Padding="4" CornerRadius="8"
+                Background="{StaticResource AppChromeBrush}"
+                BorderBrush="{StaticResource AppSubtleBorderBrush}" BorderThickness="1"
+                Visibility="Collapsed">
+            <StackPanel Orientation="Horizontal" Spacing="2">
+                <ToggleButton x:Name="FitStyleButton" Style="{StaticResource CommandToggleStyle}"
+                              Click="OnFitStyleClick"
+                              ToolTipService.ToolTip="Show the whole image, no movement (K)">
+                    <StackPanel Orientation="Horizontal" Spacing="7">
+                        <FontIcon Glyph="&#xE9A6;" FontSize="14" />
+                        <TextBlock Text="Fit" />
+                    </StackPanel>
+                </ToggleButton>
+                <ToggleButton x:Name="CoverStyleButton" Style="{StaticResource CommandToggleStyle}"
+                              Click="OnCoverStyleClick"
+                              ToolTipService.ToolTip="Fill the window and drift slowly (K)">
+                    <StackPanel Orientation="Horizontal" Spacing="7">
+                        <FontIcon Glyph="&#xE740;" FontSize="14" />
+                        <TextBlock Text="Fill" />
+                    </StackPanel>
+                </ToggleButton>
+            </StackPanel>
+        </Border>
 
         <!-- Transient status -->
         <InfoBar x:Name="Status" IsOpen="False" IsClosable="True"

@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Numerics;
 using MoveCopyScrap.Models;
+using MoveCopyScrap.Controls;
 using MoveCopyScrap.Services;
 using Microsoft.UI;
 using Microsoft.UI.Input;
@@ -14,6 +15,11 @@ using Windows.Graphics;
 using Windows.Storage.Pickers;
 using Windows.System;
 using WinRT.Interop;
+
+// Windows.System (imported above for VirtualKey) has its own DispatcherQueueTimer, so
+// importing the whole Microsoft.UI.Dispatching namespace makes the name ambiguous. The
+// alias names the one we mean without dragging the rest of the namespace in.
+using DispatcherQueueTimer = Microsoft.UI.Dispatching.DispatcherQueueTimer;
 
 namespace MoveCopyScrap;
 
@@ -34,11 +40,19 @@ public sealed partial class MainWindow : Window
     private bool _busy;
     private AppWindow? _appWindow;
 
+    private readonly AppSettings _settings;
+    private DispatcherQueueTimer? _viewModeHideTimer;
+    private bool _viewModeVisible;
+
     public MainWindow()
     {
         InitializeComponent();
 
         _thumbnails = new ThumbnailService(DispatcherQueue);
+
+        _settings = SettingsStore.Load();
+        Carousel.SetFillStyle(ParseFillStyle(_settings.FillStyle));
+        UpdateViewModeButtons();
 
         Title = "MoveCopyScrap";
         ConfigureWindow();
@@ -50,6 +64,8 @@ public sealed partial class MainWindow : Window
         Carousel.MarkToggleRequested += (_, _) => ToggleMark();
 
         RootGrid.PreviewKeyDown += OnPreviewKeyDown;
+        // Only meaningful in fill mode, where the toggle is the sole visible control.
+        RootGrid.PointerMoved += (_, _) => { if (_fillMode) ShowViewModeOverlay(); };
         RootGrid.SizeChanged += (_, _) => UpdateInsets();
         RootGrid.Loaded += (_, _) =>
         {
@@ -498,6 +514,10 @@ public sealed partial class MainWindow : Window
         TopChrome.IsHitTestVisible = !on;
         FilmstripHost.IsHitTestVisible = !on;
         Status.IsOpen = false;
+
+        // Shown briefly on entry so the toggle is discoverable, then it fades out of the way.
+        if (on) ShowViewModeOverlay();
+        else HideViewModeOverlay(collapse: true);
     }
 
     private static void AnimateChrome(FrameworkElement element, float translateY, float opacity)
@@ -526,6 +546,109 @@ public sealed partial class MainWindow : Window
 
         bool isFullScreen = _appWindow.Presenter.Kind == AppWindowPresenterKind.FullScreen;
         _appWindow.SetPresenter(isFullScreen ? AppWindowPresenterKind.Default : AppWindowPresenterKind.FullScreen);
+    }
+
+    // ---- fill style (fit vs cover) ---------------------------------------
+
+    private static CarouselFillStyle ParseFillStyle(string? value) =>
+        string.Equals(value, "Fit", StringComparison.OrdinalIgnoreCase)
+            ? CarouselFillStyle.Fit
+            : CarouselFillStyle.Cover;
+
+    private void OnFitStyleClick(object sender, RoutedEventArgs e) => SetFillStyle(CarouselFillStyle.Fit);
+
+    private void OnCoverStyleClick(object sender, RoutedEventArgs e) => SetFillStyle(CarouselFillStyle.Cover);
+
+    private void ToggleFillStyle() =>
+        SetFillStyle(Carousel.FillStyle == CarouselFillStyle.Cover
+            ? CarouselFillStyle.Fit
+            : CarouselFillStyle.Cover);
+
+    private void SetFillStyle(CarouselFillStyle style)
+    {
+        Carousel.SetFillStyle(style);
+        UpdateViewModeButtons();
+
+        _settings.FillStyle = style.ToString();
+        SettingsStore.Save(_settings);
+
+        if (_fillMode) ShowViewModeOverlay();
+        RootGrid.Focus(FocusState.Programmatic);
+    }
+
+    /// <summary>Keeps the two segments in step; they are a radio pair, not two toggles.</summary>
+    private void UpdateViewModeButtons()
+    {
+        bool fit = Carousel.FillStyle == CarouselFillStyle.Fit;
+        FitStyleButton.IsChecked = fit;
+        CoverStyleButton.IsChecked = !fit;
+    }
+
+    // ---- the auto-hiding overlay -----------------------------------------
+
+    /// <summary>
+    /// Reveals the view-mode toggle and restarts its idle timer.
+    /// </summary>
+    private void ShowViewModeOverlay()
+    {
+        if (!_fillMode) return;
+
+        if (!_viewModeVisible)
+        {
+            _viewModeVisible = true;
+            ViewModeOverlay.Visibility = Visibility.Visible;
+            ViewModeOverlay.IsHitTestVisible = true;
+            AnimateOverlayOpacity(1f);
+        }
+
+        _viewModeHideTimer ??= DispatcherQueue.CreateTimer();
+        _viewModeHideTimer.Stop();
+        _viewModeHideTimer.Interval = TimeSpan.FromSeconds(2.5);
+        _viewModeHideTimer.IsRepeating = false;
+        _viewModeHideTimer.Tick -= OnViewModeHideTick;
+        _viewModeHideTimer.Tick += OnViewModeHideTick;
+        _viewModeHideTimer.Start();
+    }
+
+    private void OnViewModeHideTick(DispatcherQueueTimer sender, object args)
+    {
+        sender.Stop();
+        // Leave it up while the pointer is over it, or a click would land on nothing.
+        // Asked of the buttons rather than the Border: IsPointerOver is a Control property,
+        // and a Border is only a FrameworkElement.
+        if (FitStyleButton.IsPointerOver || CoverStyleButton.IsPointerOver)
+        {
+            ShowViewModeOverlay();
+            return;
+        }
+        HideViewModeOverlay(collapse: false);
+    }
+
+    private void HideViewModeOverlay(bool collapse)
+    {
+        _viewModeHideTimer?.Stop();
+        if (!_viewModeVisible && !collapse) return;
+
+        _viewModeVisible = false;
+        ViewModeOverlay.IsHitTestVisible = false;
+
+        if (collapse) ViewModeOverlay.Visibility = Visibility.Collapsed;
+        else AnimateOverlayOpacity(0f);
+    }
+
+    // Composition rather than UIElement.Opacity, for the same reason as the chrome: the
+    // XAML property is left alone so nothing overwrites the animated value mid-flight.
+    private void AnimateOverlayOpacity(float opacity)
+    {
+        var visual = ElementCompositionPreview.GetElementVisual(ViewModeOverlay);
+        var compositor = visual.Compositor;
+        var ease = compositor.CreateCubicBezierEasingFunction(new Vector2(0.15f, 0f), new Vector2(0f, 1f));
+
+        var fade = compositor.CreateScalarKeyFrameAnimation();
+        fade.InsertExpressionKeyFrame(0f, "this.StartingValue");
+        fade.InsertKeyFrame(1f, opacity, ease);
+        fade.Duration = TimeSpan.FromMilliseconds(180);
+        visual.StartAnimation("Opacity", fade);
     }
 
     // ---- keyboard --------------------------------------------------------
@@ -568,6 +691,11 @@ public sealed partial class MainWindow : Window
             case VirtualKey.Enter:
             case VirtualKey.F:
                 SetFillMode(!_fillMode);
+                e.Handled = true;
+                break;
+
+            case VirtualKey.K:
+                ToggleFillStyle();
                 e.Handled = true;
                 break;
 

@@ -15,6 +15,16 @@ using Windows.UI;
 
 namespace MoveCopyScrap.Controls;
 
+/// <summary>How a picture is scaled when the carousel is filling the window.</summary>
+public enum CarouselFillStyle
+{
+    /// <summary>Cover the window, cropping whatever does not fit, and drift across the crop.</summary>
+    Cover,
+
+    /// <summary>Show the whole picture, letterboxed, perfectly still.</summary>
+    Fit
+}
+
 /// <summary>
 /// The 3D image carousel.
 ///
@@ -67,6 +77,7 @@ public sealed class CarouselView : Grid
     private IReadOnlyList<MediaItem> _items = Array.Empty<MediaItem>();
     private int _currentIndex = -1;
     private bool _fillMode;
+    private CarouselFillStyle _fillStyle = CarouselFillStyle.Cover;
 
     private static readonly SolidColorBrush MarkedBorderBrush =
         new(Color.FromArgb(0xFF, 0xFF, 0xC4, 0x4D));
@@ -117,6 +128,23 @@ public sealed class CarouselView : Grid
     public int CurrentIndex => _currentIndex;
 
     public bool FillMode => _fillMode;
+
+    public CarouselFillStyle FillStyle => _fillStyle;
+
+    /// <summary>
+    /// Switches between covering the window and fitting inside it. Takes effect immediately
+    /// when already in fill mode, animated over the usual mode duration; otherwise it just
+    /// decides what the next entry into fill mode looks like.
+    /// </summary>
+    public void SetFillStyle(CarouselFillStyle style)
+    {
+        if (_fillStyle == style) return;
+        _fillStyle = style;
+
+        if (!_fillMode) return;
+        StopKenBurns();
+        Relayout(true);
+    }
 
     public MediaItem? CurrentItem =>
         _currentIndex >= 0 && _currentIndex < _items.Count ? _items[_currentIndex] : null;
@@ -400,12 +428,9 @@ public sealed class CarouselView : Grid
 
             if (_fillMode)
             {
-                // "Fit to window" per the spec: cover the window, i.e. the larger of the
-                // two ratios, so no letterboxing is visible.
-                double cover = Math.Max(w / Math.Max(1, slot.Width), h / Math.Max(1, slot.Height));
                 tx = 0;
                 ty = 0;
-                scale = cover;
+                scale = FillScaleFor(slot.Width, slot.Height);
                 angle = 0;
                 opacity = magnitude == 0 ? 1 : 0;
                 slot.Frame.CornerRadius = new CornerRadius(0);
@@ -470,7 +495,9 @@ public sealed class CarouselView : Grid
 
         UpdateVideoSlots();
 
-        if (_fillMode) ScheduleKenBurns();
+        // Nothing to drift across when the whole picture is already visible, and the zoom
+        // pulse alone would just be movement for its own sake.
+        if (_fillMode && _fillStyle == CarouselFillStyle.Cover) ScheduleKenBurns();
     }
 
     private bool WasFillTransition { get; set; }
@@ -536,6 +563,24 @@ public sealed class CarouselView : Grid
             Matrix4x4.CreateTranslation((float)centerX, (float)centerY, 0);
     }
 
+    /// <summary>
+    /// The scale that takes a slot from its carousel size to its fill-window size.
+    ///
+    /// Cover takes the larger ratio, so the window is filled and the overflow is cropped;
+    /// Fit takes the smaller, so the whole picture is visible and the window is letterboxed.
+    /// One place for the rule, because the layout, the picture loader and the Ken Burns
+    /// loop all have to agree on it.
+    /// </summary>
+    private double FillScaleFor(double slotWidth, double slotHeight)
+    {
+        double sw = Math.Max(1, slotWidth);
+        double sh = Math.Max(1, slotHeight);
+
+        return _fillStyle == CarouselFillStyle.Cover
+            ? Math.Max(ActualWidth / sw, ActualHeight / sh)
+            : Math.Min(ActualWidth / sw, ActualHeight / sh);
+    }
+
     private static (double Width, double Height) Fit(double aspect, double maxWidth, double maxHeight)
     {
         if (aspect <= 0 || double.IsNaN(aspect)) aspect = 1.5;
@@ -577,7 +622,7 @@ public sealed class CarouselView : Grid
 
         // The fill transition left the picture at exactly this scale with no offset, and
         // the loop below both starts and ends there, so entering the mode never jumps.
-        double cover = Math.Max(w / slotW, h / slotH);
+        double cover = FillScaleFor(slotW, slotH);
         double shownW = slotW * cover;
         double shownH = slotH * cover;
 
@@ -696,8 +741,11 @@ public sealed class CarouselView : Grid
             int magnitude = Math.Abs(slot.Index - _currentIndex);
             if (slot.Item is null) continue;
 
+            // In fill mode the centre is drawn at its fill scale, which for Fit can be a
+            // good deal less than the window width - asking for ActualWidth there would
+            // decode far more than is ever shown.
             double displayWidth = _fillMode && magnitude == 0
-                ? ActualWidth
+                ? slot.Width * FillScaleFor(slot.Width, slot.Height)
                 : slot.Width;
             int target = (int)Math.Ceiling(displayWidth * rasterScale);
             if (target <= slot.LoadedWidth) continue;

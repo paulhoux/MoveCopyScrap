@@ -190,6 +190,7 @@ solution CMake generates) in Visual Studio 2022, set the platform to **x64**, an
 | `Home` / `End` | First / last image |
 | `Space` | Mark or unmark the current image |
 | `F` or `Enter` | Fill the window (side images fade out, Ken Burns drift starts) |
+| `K` | In fill mode: fit the whole image, or fill the window |
 | `Esc` | Leave fill mode |
 | `F11` | Real full screen |
 | `Ctrl+O` | Open a folder |
@@ -263,6 +264,7 @@ src/
     ThumbnailService.cs      Background thumbnails, bounded concurrency
     ImageLoader.cs           Decode-to-display-size, LRU cache
     MarkStore.cs             Debounced atomic JSON mark state
+    SettingsStore.cs         Preferences that outlive a session
     FileOperations.cs        Copy / move / recycle-bin delete
   Helpers/NaturalComparer.cs
 
@@ -326,6 +328,18 @@ already matches the window has no slack at all, so it only zooms.
 
 The loop starts and ends at zero offset — the exact framing the fill transition leaves behind —
 so there is no jump entering the mode, and none at the seam between repeats either.
+
+Fill mode has two styles, toggled with `K` or the floating control that appears top-right
+(it fades in on mouse movement and out again after a couple of seconds, since in fill mode
+it is the only visible chrome):
+
+* **Fill** — covers the window, crops what does not fit, and drifts across the crop.
+* **Fit** — shows the whole image, letterboxed, perfectly still.
+
+They are one setting rather than two, because once nothing is cropped the pan has nowhere
+to travel; `CarouselView.FillScaleFor` is the single place that decides `max` versus `min`,
+and the layout, the picture loader and the Ken Burns loop all read it. The choice is
+remembered in `%LOCALAPPDATA%\MoveCopyScrap\settings.json`.
 
 ---
 
