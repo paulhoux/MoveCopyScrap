@@ -93,6 +93,37 @@ public sealed class ThumbnailService
         }
     }
 
+    /// <summary>
+    /// Decodes one thumbnail on the calling thread, which must be the UI thread, and
+    /// hands it back rather than assigning it. Used when a file has changed underneath
+    /// us and the caller needs to swap the thumbnail and something else over together.
+    /// </summary>
+    public async Task<Microsoft.UI.Xaml.Media.ImageSource?> ReloadThumbnailAsync(string path)
+    {
+        var loaded = await MediaImageSource.OpenAsync(path, _pixelSize);
+        if (loaded is null) return null;
+
+        var payload = loaded.Value;
+        try
+        {
+            var bitmap = new BitmapImage { DecodePixelType = DecodePixelType.Physical };
+            if (payload.DecodePixelWidth > 0)
+                bitmap.DecodePixelWidth = (int)payload.DecodePixelWidth;
+
+            await bitmap.SetSourceAsync(payload.Stream);
+            return bitmap;
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[Thumbnail] reload {path}: {ex.Message}");
+            return null;
+        }
+        finally
+        {
+            payload.Stream.Dispose();
+        }
+    }
+
     /// <summary>Runs on the UI thread: turns the stream into a XAML image source.</summary>
     private static async Task ApplyOnUiThreadAsync(MediaItem item, MediaImagePayload payload, TaskCompletionSource completed)
     {
@@ -183,8 +214,15 @@ internal static class MediaImageSource
         {
             stream = await file.OpenReadAsync();
             var decoder = await BitmapDecoder.CreateAsync(stream);
-            uint w = decoder.PixelWidth;
-            uint h = decoder.PixelHeight;
+
+            // OrientedPixelWidth/Height, not PixelWidth/Height. The plain pair is the raw
+            // pixel array as stored; the oriented pair has the EXIF orientation tag applied,
+            // so for a photo tagged 6 or 8 (the two most common camera portrait tags) the two
+            // are transposed. We size the carousel slot from this, and the decoder scales to
+            // DecodePixelWidth *after* orienting, so the oriented pair is the one that matches
+            // what ends up on screen. Files without a tag report both pairs identically.
+            uint w = decoder.OrientedPixelWidth;
+            uint h = decoder.OrientedPixelHeight;
             stream.Seek(0);
             uint decodeWidth = pixelSize == 0 ? 0 : Math.Min(w == 0 ? pixelSize : w, pixelSize);
             return new MediaImagePayload(stream, w, h, decodeWidth);

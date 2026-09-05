@@ -189,6 +189,7 @@ solution CMake generates) in Visual Studio 2022, set the platform to **x64**, an
 | `←` `→` | Previous / next image (200 ms animated transition) |
 | `Home` / `End` | First / last image |
 | `Space` | Mark or unmark the current image |
+| `Ctrl+left` / `Ctrl+right` | Rotate the current image a quarter turn anticlockwise / clockwise |
 | `F` or `Enter` | Fill the window (side images fade out, Ken Burns drift starts) |
 | `K` | In fill mode: fit the whole image, or fill the window |
 | `Esc` | Leave fill mode |
@@ -201,6 +202,37 @@ solution CMake generates) in Visual Studio 2022, set the platform to **x64**, an
 Mouse: the wheel steps through images, clicking a side image jumps to it, clicking the
 centre image toggles fill mode, right-clicking the centre image marks it, and clicking a
 thumbnail jumps straight there.
+
+### Rotation
+
+`Ctrl+left` and `Ctrl+right` turn the current picture a quarter turn. The carousel card
+swings round immediately - frame, filmstrip thumbnail and neighbour spacing all follow -
+but the file is not touched for five seconds, and every further turn restarts that
+countdown. Turn a photo back to where it started and nothing is written at all.
+
+The write itself is **lossless**: only the EXIF orientation tag changes, two bytes in the
+middle of the file, with every byte of compressed image data left exactly as it was. A
+photo can be rotated as many times as you like without losing a scrap of quality, and
+Explorer, Photos, phones and browsers all show the result the same way this app does.
+
+Two consequences worth knowing:
+
+* Only **JPEG** and **TIFF** carry an orientation tag, so only those can be rotated. PNG,
+  BMP, GIF, HEIC, WebP and video are declined with an explanation rather than re-encoded
+  behind your back.
+* A JPEG that has metadata but no orientation tag inside it is also declined. Adding one
+  means rebuilding the whole metadata block, which shifts every internal offset - including
+  the ones inside the camera maker's private MakerNote, which cannot be rewritten reliably.
+  Damaging somebody's metadata silently is worse than saying no. (A JPEG with no metadata
+  at all is fine: there is nothing to damage, so a minimal block is added.)
+
+Pending rotations are always flushed before the folder changes, before any copy, move or
+delete, and when the window closes, so what lands on disk is never out of step with what
+you saw.
+
+`testdata/exif-orientation/` holds one fixture per EXIF orientation value. All eight are
+different pixel arrays that must render as the same picture; open that folder to check
+that orientation handling is still correct end to end.
 
 ### Marks
 
@@ -258,12 +290,13 @@ src/
   App.xaml[.cs]              Dark theme, palette and command-bar styles
   MainWindow.xaml[.cs]       Title bar, command bar, filmstrip, dialogs, keyboard
   Controls/CarouselView.cs   The carousel
-  Models/MediaItem.cs        One file: marks, thumbnail, aspect ratio (INotifyPropertyChanged)
+  Models/MediaItem.cs        One file: marks, thumbnail, aspect ratio, rotation (INPC)
   Services/
     MediaScanner.cs          Folder enumeration + Explorer-style natural sort
     ThumbnailService.cs      Background thumbnails, bounded concurrency
     ImageLoader.cs           Decode-to-display-size, LRU cache
     MarkStore.cs             Debounced atomic JSON mark state
+    RotationService.cs       Lossless rotation by rewriting the EXIF orientation tag
     SettingsStore.cs         Preferences that outlive a session
     FileOperations.cs        Copy / move / recycle-bin delete
   Helpers/NaturalComparer.cs

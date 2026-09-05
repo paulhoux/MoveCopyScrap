@@ -89,6 +89,55 @@ public sealed class ImageLoader
         }
     }
 
+    /// <summary>
+    /// Decodes afresh, ignoring - and then replacing - anything already cached for this
+    /// file. Used after the file itself has changed on disk.
+    ///
+    /// The old bitmap deliberately stays in the cache until the new one is in hand: the
+    /// carousel may ask for this picture at any moment, and handing it a stale bitmap is
+    /// far better than handing it nothing, or than opening a window in which a fresh
+    /// decode gets the rotation applied twice.
+    /// </summary>
+    public async Task<BitmapImage?> ReloadAsync(MediaItem item, int targetPixelWidth)
+    {
+        int bucket = Math.Clamp(
+            ((targetPixelWidth + BucketStep - 1) / BucketStep) * BucketStep, BucketStep, 8192);
+
+        var payload = await MediaImageSource.OpenAsync(item.Path, (uint)bucket).ConfigureAwait(true);
+        if (payload is null) return null;
+
+        var data = payload.Value;
+        try
+        {
+            var bitmap = new BitmapImage { DecodePixelType = DecodePixelType.Physical };
+
+            uint natural = data.OriginalWidth;
+            int decodeWidth = data.DecodePixelWidth > 0
+                ? (int)data.DecodePixelWidth
+                : (natural > 0 ? (int)Math.Min(natural, (uint)bucket) : bucket);
+            bitmap.DecodePixelWidth = Math.Max(1, decodeWidth);
+
+            await bitmap.SetSourceAsync(data.Stream);
+
+            if (data.OriginalWidth > 0 && data.OriginalHeight > 0)
+                item.AspectRatio = data.OriginalWidth / (double)data.OriginalHeight;
+            else if (bitmap.PixelHeight > 0)
+                item.AspectRatio = bitmap.PixelWidth / (double)bitmap.PixelHeight;
+
+            Insert(item.Path, bitmap, bucket);
+            return bitmap;
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[ImageLoader] reload {item.FileName}: {ex.Message}");
+            return null;
+        }
+        finally
+        {
+            data.Stream.Dispose();
+        }
+    }
+
     private void Touch(CacheEntry entry)
     {
         _order.Remove(entry.Node);

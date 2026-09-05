@@ -64,6 +64,7 @@ public sealed class CarouselView : Grid
 
     public static readonly TimeSpan TransitionDuration = TimeSpan.FromMilliseconds(200);
     public static readonly TimeSpan ModeDuration = TimeSpan.FromMilliseconds(320);
+    public static readonly TimeSpan RotationDuration = TimeSpan.FromMilliseconds(240);
 
     // ---- state -----------------------------------------------------------
     private readonly Grid _stage = new();
@@ -258,10 +259,22 @@ public sealed class CarouselView : Grid
             }
         };
 
+        // The picture - and only the picture - turns when a rotation is applied, so it
+        // gets a layer of its own. That layer is sized to the box the *unrotated* pixels
+        // want, which is the frame's box with its sides swapped, and then spun a quarter
+        // turn about its own centre, so it lands exactly inside the frame. The mark badge
+        // stays outside it, upright in the corner where the user expects it.
+        var rotator = new Grid
+        {
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        rotator.Children.Add(image);
+        rotator.Children.Add(mediaHost);
+        rotator.Children.Add(overlay);
+
         var content = new Grid();
-        content.Children.Add(image);
-        content.Children.Add(mediaHost);
-        content.Children.Add(overlay);
+        content.Children.Add(rotator);
         content.Children.Add(markBadge);
 
         var frame = new Border
@@ -290,15 +303,26 @@ public sealed class CarouselView : Grid
         visual.RotationAxis = new Vector3(0, 1, 0);
         visual.Opacity = 0;
 
+        var rotatorVisual = ElementCompositionPreview.GetElementVisual(rotator);
+        rotatorVisual.RotationAxis = new Vector3(0, 0, 1);
+
+        // The card as a whole turns during the rotation transition, border and all. Its
+        // Y-axis perspective tilt lives on the root visual, so this one is free to use Z.
+        var frameVisual = ElementCompositionPreview.GetElementVisual(frame);
+        frameVisual.RotationAxis = new Vector3(0, 0, 1);
+
         var slot = new Slot
         {
             Root = root,
             Frame = frame,
+            Rotator = rotator,
             Image = image,
             MediaHost = mediaHost,
             Overlay = overlay,
             MarkBadge = markBadge,
-            Visual = visual
+            Visual = visual,
+            FrameVisual = frameVisual,
+            RotatorVisual = rotatorVisual
         };
 
         root.Tapped += (_, _) => OnSlotTapped(slot);
@@ -346,7 +370,7 @@ public sealed class CarouselView : Grid
     {
         slot.Index = index;
         slot.Item = item;
-        slot.Aspect = item.AspectRatio;
+        slot.Aspect = item.EffectiveAspectRatio;
         slot.Image.Source = item.Thumbnail;
         slot.LoadedWidth = 0;
         UpdateMarkVisual(slot);
@@ -361,6 +385,13 @@ public sealed class CarouselView : Grid
         slot.LoadedWidth = 0;
         slot.Visual.StopAnimation("Opacity");
         slot.Visual.Opacity = 0;
+
+        slot.FrameVisual.StopAnimation("RotationAngleInDegrees");
+        slot.FrameVisual.StopAnimation("Scale");
+        slot.FrameVisual.RotationAngleInDegrees = 0;
+        slot.FrameVisual.Scale = Vector3.One;
+        slot.RotatorVisual.RotationAngleInDegrees = 0;
+
         if (!_pool.Contains(slot)) _pool.Add(slot);
     }
 
@@ -398,7 +429,7 @@ public sealed class CarouselView : Grid
         foreach (var slot in _active.Values)
         {
             // Pick up an aspect ratio that arrived with a thumbnail after the slot was filled.
-            if (slot.Item is not null) slot.Aspect = slot.Item.AspectRatio;
+            if (slot.Item is not null) slot.Aspect = slot.Item.EffectiveAspectRatio;
 
             var (sw, sh) = Fit(slot.Aspect, cellWidth, cellHeight);
             if (Math.Abs(slot.Width - sw) > 0.5 || Math.Abs(slot.Height - sh) > 0.5)
@@ -409,6 +440,7 @@ public sealed class CarouselView : Grid
                 slot.Root.Height = sh;
             }
             slot.Visual.CenterPoint = new Vector3((float)(sw / 2), (float)(sh / 2), 0);
+            PlacePictureLayer(slot, sw, sh);
         }
 
         double centreWidth = cellWidth;
@@ -501,6 +533,133 @@ public sealed class CarouselView : Grid
     }
 
     private bool WasFillTransition { get; set; }
+
+    // ---- rotation --------------------------------------------------------
+
+    /// <summary>
+    /// Set once by the window. Lets a rotation refresh the filmstrip thumbnail at the
+    /// same instant it refreshes the picture, instead of a frame or two later.
+    /// </summary>
+    public ThumbnailService? Thumbnails { get; set; }
+
+    /// <summary>
+    /// Sizes and turns a slot's picture layer. The layer takes the frame's box with its
+    /// sides swapped whenever the rotation is a quarter turn, so turning it about its own
+    /// centre drops it exactly into the frame - no letterboxing, no overflow.
+    /// </summary>
+    private static void PlacePictureLayer(Slot slot, double boxWidth, double boxHeight)
+    {
+        int steps = slot.Item?.RotationSteps ?? 0;
+        bool quarter = (steps & 1) != 0;
+
+        double rw = quarter ? boxHeight : boxWidth;
+        double rh = quarter ? boxWidth : boxHeight;
+
+        // NaN on the first pass, and every comparison against NaN is false, so the
+        // "has it moved enough to be worth a layout pass" test has to be spelled out.
+        if (double.IsNaN(slot.Rotator.Width) || double.IsNaN(slot.Rotator.Height) ||
+            Math.Abs(slot.Rotator.Width - rw) > 0.5 || Math.Abs(slot.Rotator.Height - rh) > 0.5)
+        {
+            slot.Rotator.Width = rw;
+            slot.Rotator.Height = rh;
+        }
+
+        slot.RotatorVisual.CenterPoint = new Vector3((float)(rw / 2), (float)(rh / 2), 0);
+        slot.RotatorVisual.RotationAngleInDegrees = steps * 90f;
+    }
+
+    /// <summary>
+    /// Turns the centre picture a quarter turn: +1 clockwise, -1 anticlockwise.
+    /// Returns false if there is nothing rotatable in the centre.
+    /// </summary>
+    public bool RotateCurrent(int direction)
+    {
+        if (!_active.TryGetValue(_currentIndex, out var slot)) return false;
+        var item = slot.Item;
+        if (item is null || item.IsVideo) return false;
+
+        double oldHeight = slot.Height;
+        double oldRootScale = _fillMode ? FillScaleFor(slot.Width, slot.Height) : 1.0;
+
+        item.Rotate(direction);
+
+        // Snap straight to the finished state - new frame shape, new picture angle,
+        // neighbours nudged aside - and then animate the card back from how it used to
+        // look. That way the transition can never disagree with where things end up.
+        Relayout(animate: true);
+
+        double newRootScale = _fillMode ? FillScaleFor(slot.Width, slot.Height) : 1.0;
+        if (oldHeight < 1 || newRootScale < 0.0001) return true;
+
+        // Turning the new card back a quarter turn and shrinking it by this much
+        // reproduces the old card exactly: the two boxes are transposes of each other,
+        // so one number covers both dimensions.
+        double cardScale = slot.Width / oldHeight;
+        if (cardScale < 0.0001) return true;
+
+        AnimateCardTurn(slot,
+            startAngle: -90f * Math.Sign(direction),
+            startScale: (float)(oldRootScale / newRootScale / cardScale));
+        return true;
+    }
+
+    private void AnimateCardTurn(Slot slot, float startAngle, float startScale)
+    {
+        var compositor = _compositor;
+        if (compositor is null) return;
+
+        var visual = slot.FrameVisual;
+        visual.CenterPoint = new Vector3((float)(slot.Width / 2), (float)(slot.Height / 2), 0);
+
+        var spin = compositor.CreateScalarKeyFrameAnimation();
+        spin.InsertKeyFrame(0f, startAngle);
+        spin.InsertKeyFrame(1f, 0f, _ease!);
+        spin.Duration = RotationDuration;
+        visual.StartAnimation("RotationAngleInDegrees", spin);
+
+        var zoom = compositor.CreateVector3KeyFrameAnimation();
+        zoom.InsertKeyFrame(0f, new Vector3(startScale, startScale, 1));
+        zoom.InsertKeyFrame(1f, Vector3.One, _ease!);
+        zoom.Duration = RotationDuration;
+        visual.StartAnimation("Scale", zoom);
+    }
+
+    /// <summary>
+    /// Called once <paramref name="steps"/> quarter turns have been written to the file.
+    /// Re-decodes the picture and its thumbnail - which now carry the rotation themselves -
+    /// and takes the drawn rotation off in the same breath.
+    /// </summary>
+    public async Task CommitRotationAsync(MediaItem item, int steps)
+    {
+        Slot? target = null;
+        foreach (var candidate in _active.Values)
+        {
+            if (!ReferenceEquals(candidate.Item, item)) continue;
+            target = candidate;
+            break;
+        }
+
+        double rasterScale = XamlRoot?.RasterizationScale ?? 1.0;
+        double box = target is null ? 640 : Math.Max(target.Width, target.Height);
+        int width = (int)Math.Ceiling(Math.Max(256, box) * rasterScale);
+
+        var thumbnail = Thumbnails is null ? null : await Thumbnails.ReloadThumbnailAsync(item.Path);
+        var bitmap = await _loader.ReloadAsync(item, width);
+
+        // Nothing below here may await. The freshly decoded pixels already carry the
+        // rotation, so they must not reach the screen for even one frame while
+        // RotationSteps still says to draw it on top.
+        item.CommitRotation(steps, pixelsReloaded: bitmap is not null);
+        if (thumbnail is not null) item.Thumbnail = thumbnail;
+
+        if (target is not null && bitmap is not null && ReferenceEquals(target.Item, item))
+        {
+            target.Image.Source = bitmap;
+            target.LoadedWidth = width;
+        }
+
+        Relayout(animate: false);
+    }
 
     private void ApplyTransform(Slot slot, double tx, double ty, double scale, double angle,
                                 double opacity, bool animate, TimeSpan duration)
@@ -744,9 +903,13 @@ public sealed class CarouselView : Grid
             // In fill mode the centre is drawn at its fill scale, which for Fit can be a
             // good deal less than the window width - asking for ActualWidth there would
             // decode far more than is ever shown.
+            // While a rotation is pending the frame is the transpose of the picture, so
+            // the width to decode for is the frame's *height*.
+            double natural = (slot.Item.RotationSteps & 1) != 0 ? slot.Height : slot.Width;
+
             double displayWidth = _fillMode && magnitude == 0
-                ? slot.Width * FillScaleFor(slot.Width, slot.Height)
-                : slot.Width;
+                ? natural * FillScaleFor(slot.Width, slot.Height)
+                : natural;
             int target = (int)Math.Ceiling(displayWidth * rasterScale);
             if (target <= slot.LoadedWidth) continue;
 
@@ -767,9 +930,9 @@ public sealed class CarouselView : Grid
             slot.Image.Source = bitmap;
             slot.LoadedWidth = targetWidth;
 
-            if (Math.Abs(slot.Aspect - item.AspectRatio) > 0.005)
+            if (Math.Abs(slot.Aspect - item.EffectiveAspectRatio) > 0.005)
             {
-                slot.Aspect = item.AspectRatio;
+                slot.Aspect = item.EffectiveAspectRatio;
                 Relayout(true);
             }
         }
@@ -1014,11 +1177,14 @@ public sealed class CarouselView : Grid
     {
         public Grid Root = null!;
         public Border Frame = null!;
+        public Grid Rotator = null!;
         public Image Image = null!;
         public Grid MediaHost = null!;
         public Grid Overlay = null!;
         public Border MarkBadge = null!;
         public Visual Visual = null!;
+        public Visual FrameVisual = null!;
+        public Visual RotatorVisual = null!;
 
         public MediaItem? Item;
         public int Index = int.MinValue;

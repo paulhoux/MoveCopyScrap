@@ -44,11 +44,18 @@ public sealed partial class MainWindow : Window
     private DispatcherQueueTimer? _viewModeHideTimer;
     private bool _viewModeVisible;
 
+    // Rotations are shown at once but written lazily: turning a photo twice, or turning it
+    // and changing your mind, should touch the file once or not at all.
+    private static readonly TimeSpan RotationWriteDelay = TimeSpan.FromSeconds(5);
+    private readonly List<MediaItem> _rotationQueue = new();
+    private DispatcherQueueTimer? _rotationTimer;
+
     public MainWindow()
     {
         InitializeComponent();
 
         _thumbnails = new ThumbnailService(DispatcherQueue);
+        Carousel.Thumbnails = _thumbnails;
 
         _settings = SettingsStore.Load();
         Carousel.SetFillStyle(ParseFillStyle(_settings.FillStyle));
@@ -158,6 +165,7 @@ public sealed partial class MainWindow : Window
 
     private void OnClosed(object sender, WindowEventArgs args)
     {
+        FlushRotationsOnShutdown();
         Carousel.ReleaseMedia();
         _markStore?.Dispose();
         _markStore = null;
@@ -192,6 +200,9 @@ public sealed partial class MainWindow : Window
 
     private async Task LoadFolderAsync(string folder)
     {
+        // These items are about to disappear from the list; settle their files first.
+        await FlushRotationsAsync();
+
         ShowBusy($"Reading {System.IO.Path.GetFileName(folder)}…", 0);
 
         try
@@ -324,12 +335,145 @@ public sealed partial class MainWindow : Window
 
     private List<MediaItem> MarkedItems() => _items.Where(i => i.IsMarked).ToList();
 
+    // ---- rotation --------------------------------------------------------
+
+    private void OnRotateCcwClick(object sender, RoutedEventArgs e)
+    {
+        RotateCurrent(-1);
+        RootGrid.Focus(FocusState.Programmatic);
+    }
+
+    private void OnRotateCwClick(object sender, RoutedEventArgs e)
+    {
+        RotateCurrent(1);
+        RootGrid.Focus(FocusState.Programmatic);
+    }
+
+    /// <summary>Turns the current picture a quarter turn: +1 clockwise, -1 anticlockwise.</summary>
+    private void RotateCurrent(int direction)
+    {
+        var item = CurrentItem;
+        if (item is null || _busy) return;
+
+        if (item.IsVideo)
+        {
+            ShowStatus(InfoBarSeverity.Informational, "Videos cannot be rotated", item.FileName);
+            return;
+        }
+
+        // Ask the file, not just its extension, and ask before turning anything: it is far
+        // kinder to say "this one cannot be rotated" now than to turn it on screen and then
+        // quietly fail to save five seconds later. Only on the first turn, though - once a
+        // rotation is already pending we know the answer.
+        if (item.PendingDiskSteps == 0)
+        {
+            var support = RotationService.Inspect(item.Path);
+            if (support != RotationSupport.Supported)
+            {
+                ShowStatus(InfoBarSeverity.Warning, "This file cannot be rotated",
+                           ExplainRotation(support, item.FileName));
+                return;
+            }
+        }
+
+        if (!Carousel.RotateCurrent(direction)) return;
+
+        if (!_rotationQueue.Contains(item)) _rotationQueue.Add(item);
+        RestartRotationTimer();
+        UpdateCaption();
+    }
+
+    private static string ExplainRotation(RotationSupport support, string fileName) => support switch
+    {
+        RotationSupport.UnsupportedFormat =>
+            $"{fileName} is not a JPEG or TIFF. Rotating without re-compressing means rewriting the " +
+            "EXIF orientation tag, and only those formats carry one.",
+
+        RotationSupport.NoOrientationTag =>
+            $"{fileName} has metadata but no orientation tag, and adding one would mean rebuilding the " +
+            "whole metadata block - which risks damaging the camera information stored alongside it.",
+
+        _ => $"{fileName} could not be read."
+    };
+
+    private void RestartRotationTimer()
+    {
+        // A picture turned back to where it started needs no write at all.
+        _rotationQueue.RemoveAll(i => i.PendingDiskSteps == 0);
+
+        _rotationTimer ??= CreateRotationTimer();
+        _rotationTimer.Stop();
+
+        if (_rotationQueue.Count == 0) return;
+
+        _rotationTimer.Interval = RotationWriteDelay;
+        _rotationTimer.Start();
+    }
+
+    private DispatcherQueueTimer CreateRotationTimer()
+    {
+        var timer = DispatcherQueue.CreateTimer();
+        timer.IsRepeating = false;
+        timer.Tick += (_, _) => _ = FlushRotationsAsync();
+        return timer;
+    }
+
+    /// <summary>Writes every pending rotation now. Safe to call when there is nothing to do.</summary>
+    private async Task FlushRotationsAsync()
+    {
+        _rotationTimer?.Stop();
+
+        var pending = _rotationQueue.Where(i => i.PendingDiskSteps != 0).ToList();
+        _rotationQueue.Clear();
+        if (pending.Count == 0) return;
+
+        foreach (var item in pending)
+        {
+            int steps = item.PendingDiskSteps;
+            bool written = await RotationService.RotateAsync(item.Path, steps);
+
+            if (!written)
+            {
+                item.AbandonPendingRotation();
+                ShowStatus(InfoBarSeverity.Warning, "Could not save the rotation",
+                    $"{item.FileName} is still shown turned, but the file itself is unchanged. " +
+                    "It may be read-only, or open in another program.");
+                continue;
+            }
+
+            await Carousel.CommitRotationAsync(item, steps);
+        }
+
+        UpdateCaption();
+    }
+
+    /// <summary>
+    /// The closing path cannot await, so pending rotations are written straight through.
+    /// It is a couple of bytes per file, so even a long queue closes instantly.
+    /// </summary>
+    private void FlushRotationsOnShutdown()
+    {
+        _rotationTimer?.Stop();
+
+        foreach (var item in _rotationQueue)
+        {
+            if (item.PendingDiskSteps == 0) continue;
+            try { RotationService.Rotate(item.Path, item.PendingDiskSteps); }
+            catch { /* nothing useful to say to a window that is already gone */ }
+        }
+
+        _rotationQueue.Clear();
+    }
+
     // ---- file commands ---------------------------------------------------
 
     private async void OnCopyMarkedClick(object sender, RoutedEventArgs e)
     {
         var marked = MarkedItems();
         if (marked.Count == 0 || _busy) return;
+
+        // Copy the rotated version, not the one that was about to be rotated.
+        await FlushRotationsAsync();
 
         string? destination = await PickFolderAsync();
         if (destination is null) return;
@@ -353,6 +497,9 @@ public sealed partial class MainWindow : Window
     {
         var marked = MarkedItems();
         if (marked.Count == 0 || _busy) return;
+
+        // Move the rotated version, and settle the file before it changes address.
+        await FlushRotationsAsync();
 
         string? destination = await PickFolderAsync();
         if (destination is null) return;
@@ -385,6 +532,11 @@ public sealed partial class MainWindow : Window
     {
         var marked = MarkedItems();
         if (marked.Count == 0 || _busy || _folder is null) return;
+
+        // No point writing a rotation into a file that is about to be deleted, but the
+        // queue must be cleared either way so nothing is written to a vanished path.
+        foreach (var item in marked) item.AbandonPendingRotation();
+        await FlushRotationsAsync();
 
         bool recycle = FileOperations.SupportsRecycleBin(_folder);
 
@@ -664,12 +816,14 @@ public sealed partial class MainWindow : Window
         switch (e.Key)
         {
             case VirtualKey.Left:
-                SetIndex(_currentIndex - 1, animate: true);
+                if (ctrl) RotateCurrent(-1);
+                else SetIndex(_currentIndex - 1, animate: true);
                 e.Handled = true;
                 break;
 
             case VirtualKey.Right:
-                SetIndex(_currentIndex + 1, animate: true);
+                if (ctrl) RotateCurrent(1);
+                else SetIndex(_currentIndex + 1, animate: true);
                 e.Handled = true;
                 break;
 
@@ -739,6 +893,11 @@ public sealed partial class MainWindow : Window
         DeleteButton.IsEnabled = hasMarked && !_busy;
         MarkButton.IsEnabled = CurrentItem is not null && !_busy;
 
+        bool rotatable = CurrentItem is not null && !CurrentItem.IsVideo && !_busy &&
+                         RotationService.IsRotatableFormat(CurrentItem.Path);
+        RotateCcwButton.IsEnabled = rotatable;
+        RotateCwButton.IsEnabled = rotatable;
+
         bool marked = CurrentItem?.IsMarked == true;
         MarkGlyph.Glyph = marked ? GlyphStarFilled : GlyphStarOutline;
         MarkButtonText.Text = marked ? "Unmark" : "Mark";
@@ -760,7 +919,8 @@ public sealed partial class MainWindow : Window
             : $"{Math.Max(1, item.SizeBytes / 1024)} KB";
 
         CaptionText.Text = $"{item.FileName}    ·    {size}    ·    {item.LastWriteUtc.ToLocalTime():g}" +
-                           (item.IsMarked ? "    ·    marked" : "");
+                           (item.IsMarked ? "    ·    marked" : "") +
+                           (item.PendingDiskSteps != 0 ? "    ·    rotated, saving shortly" : "");
     }
 
     // ---- status / busy ---------------------------------------------------
