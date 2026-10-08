@@ -1,4 +1,6 @@
 using System.Numerics;
+using Microsoft.Graphics.Canvas;
+using Microsoft.Graphics.Canvas.UI.Xaml;
 using MoveCopyScrap.Models;
 using MoveCopyScrap.Services;
 using Microsoft.UI.Composition;
@@ -11,6 +13,7 @@ using Microsoft.UI.Xaml.Media;
 using Windows.Media.Core;
 using Windows.Media.Playback;
 using Windows.Storage;
+using Windows.Storage.FileProperties;
 using Windows.UI;
 
 namespace MoveCopyScrap.Controls;
@@ -955,6 +958,18 @@ public sealed class CarouselView : Grid
         }
     }
 
+    /// <summary>
+    /// Starts the centre slot's video.
+    ///
+    /// The player runs in frame-server mode: instead of handing its picture to a
+    /// MediaPlayerElement, it tells us each time a frame is ready and we copy that frame
+    /// into a Win2D surface shown by an ordinary <see cref="Image"/>. MediaPlayerElement
+    /// was dropped because, inside this carousel, it would now and then stop updating
+    /// after the first frame while the player itself carried on playing (scrubber moving,
+    /// picture frozen). Drawing the frames ourselves takes it out of the picture, and as
+    /// a bonus the poster thumbnail stays visible until the first real frame is ready,
+    /// instead of a black rectangle.
+    /// </summary>
     private void EnsureVideo(Slot slot)
     {
         if (slot.Player is not null || slot.Item is null) return;
@@ -964,27 +979,56 @@ public sealed class CarouselView : Grid
             IsMuted = true,
             Volume = 0,
             IsLoopingEnabled = true,
-            AutoPlay = true
+            AutoPlay = true,
+            IsVideoFrameServerEnabled = true
         };
 
-        var element = new MediaPlayerElement
+        // Invisible until the first frame has been drawn into it; the thumbnail in
+        // slot.Image underneath shows until then.
+        var videoImage = new Image
         {
-            AreTransportControlsEnabled = false,
             Stretch = Stretch.Uniform,
             IsHitTestVisible = false,
             HorizontalAlignment = HorizontalAlignment.Stretch,
-            VerticalAlignment = VerticalAlignment.Stretch
+            VerticalAlignment = VerticalAlignment.Stretch,
+            Opacity = 0
         };
-        element.SetMediaPlayer(player);
 
-        slot.MediaHost.Children.Add(element);
+        slot.MediaHost.Children.Add(videoImage);
         slot.Player = player;
-        slot.PlayerElement = element;
+        slot.VideoImage = videoImage;
+        slot.VideoRotation = 0;
+
+        int id = VideoLog.NextId();
+        slot.LogId = id;
+        VideoLog.Write($"#{id} create for slot {slot.Index} {slot.Item.FileName}");
+
+        // VideoFrameAvailable arrives on a worker thread. Only one hop to the UI thread is
+        // kept in flight per player: if frames arrive faster than we can draw them, the
+        // extra ones are simply skipped and the next hop draws whatever is newest.
+        var dispatcher = DispatcherQueue;
+        int hopPending = 0;
+        player.VideoFrameAvailable += (sender, _) =>
+        {
+            if (Interlocked.Exchange(ref hopPending, 1) == 1) return;
+            bool queued = dispatcher.TryEnqueue(() =>
+            {
+                Volatile.Write(ref hopPending, 0);
+                DrawVideoFrame(slot, sender);
+            });
+            if (!queued) Volatile.Write(ref hopPending, 0);
+        };
+
+        player.MediaOpened += (p, _) =>
+            VideoLog.Write($"#{id} opened {p.PlaybackSession.NaturalVideoWidth}x{p.PlaybackSession.NaturalVideoHeight}");
+        player.MediaFailed += (_, e) =>
+            VideoLog.Write($"#{id} failed {e.Error} {e.ErrorMessage}");
+        player.PlaybackSession.PlaybackStateChanged += (session, _) =>
+            VideoLog.Write($"#{id} state {session.PlaybackState}");
 
         BuildScrubber(slot);
 
-        string path = slot.Item.Path;
-        _ = SetVideoSourceAsync(player, path);
+        _ = SetVideoSourceAsync(slot, player, slot.Item.Path, id);
 
         var timer = DispatcherQueue.CreateTimer();
         timer.Interval = TimeSpan.FromMilliseconds(200);
@@ -994,16 +1038,124 @@ public sealed class CarouselView : Grid
         slot.Ticker = timer;
     }
 
-    private static async Task SetVideoSourceAsync(MediaPlayer player, string path)
+    /// <summary>
+    /// Reads the file's orientation tag, then hands the file to the player. Runs on the
+    /// UI thread (the awaits resume there).
+    /// </summary>
+    private static async Task SetVideoSourceAsync(Slot slot, MediaPlayer player, string path, int id)
     {
         try
         {
             var file = await StorageFile.GetFileFromPathAsync(path);
+
+            // Phones store upright video as landscape frames plus a "rotate on playback"
+            // tag. MediaPlayerElement applied that tag for us; in frame-server mode the
+            // frames arrive as stored, so we turn them ourselves when drawing.
+            int rotation = 0;
+            try
+            {
+                var properties = await file.Properties.GetVideoPropertiesAsync();
+                rotation = properties.Orientation switch
+                {
+                    VideoOrientation.Rotate90 => 90,
+                    VideoOrientation.Rotate180 => 180,
+                    VideoOrientation.Rotate270 => 270,
+                    _ => 0
+                };
+                VideoLog.Write($"#{id} properties {properties.Width}x{properties.Height}, orientation {properties.Orientation}");
+            }
+            catch (Exception ex)
+            {
+                VideoLog.Write($"#{id} no video properties: {ex.Message}");
+            }
+
+            // Torn down (moved on to another item) while we were reading the file.
+            if (!ReferenceEquals(slot.Player, player)) return;
+
+            slot.VideoRotation = rotation;
             player.Source = MediaSource.CreateFromStorageFile(file);
+            VideoLog.Write($"#{id} source set");
         }
         catch (Exception ex)
         {
+            VideoLog.Write($"#{id} source failed: {ex.Message}");
             System.Diagnostics.Debug.WriteLine($"[Carousel] video source: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// UI thread: copies the player's current frame into the slot's surface. The frame is
+    /// first copied at its stored size into <see cref="Slot.VideoFrame"/>, then drawn,
+    /// turned if the file says so, into <see cref="Slot.VideoSurface"/>, which is what
+    /// the Image shows.
+    /// </summary>
+    private static void DrawVideoFrame(Slot slot, MediaPlayer player)
+    {
+        // The slot may have moved on, or be on a different player, by the time we get here.
+        if (!ReferenceEquals(slot.Player, player) || slot.VideoImage is null) return;
+
+        try
+        {
+            var session = player.PlaybackSession;
+            int frameWidth = (int)session.NaturalVideoWidth;
+            int frameHeight = (int)session.NaturalVideoHeight;
+            if (frameWidth <= 0 || frameHeight <= 0) return;
+
+            int rotation = slot.VideoRotation;
+            bool quarter = rotation == 90 || rotation == 270;
+            int surfaceWidth = quarter ? frameHeight : frameWidth;
+            int surfaceHeight = quarter ? frameWidth : frameHeight;
+
+            var device = CanvasDevice.GetSharedDevice();
+
+            // (Re)create the two surfaces on the first frame and if the video's size
+            // changes. A lost graphics device ends up in the catch below, which drops them.
+            if (slot.VideoFrame is null || slot.VideoSurface is null ||
+                (int)slot.VideoFrame.SizeInPixels.Width != frameWidth ||
+                (int)slot.VideoFrame.SizeInPixels.Height != frameHeight ||
+                (int)slot.VideoSurface.SizeInPixels.Width != surfaceWidth ||
+                (int)slot.VideoSurface.SizeInPixels.Height != surfaceHeight)
+            {
+                slot.VideoFrame?.Dispose();
+                // 96 DPI, so device-independent units are pixels.
+                slot.VideoFrame = new CanvasRenderTarget(device, frameWidth, frameHeight, 96);
+                slot.VideoSurface = new CanvasImageSource(device, surfaceWidth, surfaceHeight, 96);
+                slot.VideoImage.Source = slot.VideoSurface;
+                VideoLog.Write($"#{slot.LogId} surfaces {frameWidth}x{frameHeight} -> {surfaceWidth}x{surfaceHeight} (rotation {rotation})");
+            }
+
+            player.CopyFrameToVideoSurface(slot.VideoFrame);
+
+            using (var ds = slot.VideoSurface.CreateDrawingSession(Microsoft.UI.Colors.Black))
+            {
+                if (rotation != 0)
+                {
+                    // Turn clockwise about the frame's centre, then move that centre onto
+                    // the surface's centre.
+                    ds.Transform =
+                        Matrix3x2.CreateRotation((float)(rotation * Math.PI / 180.0),
+                                                 new Vector2(frameWidth / 2f, frameHeight / 2f)) *
+                        Matrix3x2.CreateTranslation((surfaceWidth - frameWidth) / 2f,
+                                                    (surfaceHeight - frameHeight) / 2f);
+                }
+
+                ds.DrawImage(slot.VideoFrame);
+            }
+
+            if (slot.VideoImage.Opacity < 1)
+            {
+                slot.VideoImage.Opacity = 1;
+                VideoLog.Write($"#{slot.LogId} first frame drawn");
+            }
+        }
+        catch (Exception ex)
+        {
+            // Most likely a lost graphics device. Drop the surfaces; the next frame
+            // rebuilds them on a fresh device.
+            VideoLog.Write($"#{slot.LogId} draw failed: 0x{ex.HResult:X8} {ex.Message}");
+            slot.VideoFrame?.Dispose();
+            slot.VideoFrame = null;
+            slot.VideoSurface = null;
         }
     }
 
@@ -1131,15 +1283,20 @@ public sealed class CarouselView : Grid
             slot.TimeText = null;
         }
 
-        if (slot.PlayerElement is not null)
+        if (slot.VideoImage is not null)
         {
-            slot.PlayerElement.SetMediaPlayer(null);
-            slot.MediaHost.Children.Remove(slot.PlayerElement);
-            slot.PlayerElement = null;
+            slot.VideoImage.Source = null;
+            slot.MediaHost.Children.Remove(slot.VideoImage);
+            slot.VideoImage = null;
         }
+
+        slot.VideoFrame?.Dispose();
+        slot.VideoFrame = null;
+        slot.VideoSurface = null;
 
         if (slot.Player is not null)
         {
+            VideoLog.Write($"#{slot.LogId} dispose");
             try
             {
                 slot.Player.Pause();
@@ -1197,7 +1354,11 @@ public sealed class CarouselView : Grid
         public bool KenBurnsRunning;
 
         public MediaPlayer? Player;
-        public MediaPlayerElement? PlayerElement;
+        public Image? VideoImage;                 // shows VideoSurface
+        public CanvasRenderTarget? VideoFrame;    // the player's frame, as stored
+        public CanvasImageSource? VideoSurface;   // the frame as shown (turned if need be)
+        public int VideoRotation;                 // degrees clockwise, from the file's tag
+        public int LogId;                         // TEMPORARY, VideoLog
         public Border? Scrubber;
         public Slider? ScrubSlider;
         public TextBlock? TimeText;

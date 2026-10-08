@@ -210,7 +210,8 @@
                               VerticalScrollMode="Disabled" VerticalScrollBarVisibility="Disabled"
                               IsVerticalRailEnabled="False" ZoomMode="Disabled">
                     <ItemsRepeater x:Name="Filmstrip" HorizontalAlignment="Left"
-                                   ElementPrepared="OnFilmstripElementPrepared">
+                                   ElementPrepared="OnFilmstripElementPrepared"
+                                   ElementClearing="OnFilmstripElementClearing">
                         <ItemsRepeater.Layout>
                             <StackLayout Orientation="Horizontal" Spacing="6" />
                         </ItemsRepeater.Layout>

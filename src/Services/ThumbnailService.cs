@@ -16,54 +16,182 @@ namespace MoveCopyScrap.Services;
 /// shares - we fall back to decoding the file ourselves at a reduced size.
 /// Only the final <see cref="BitmapImage"/> creation happens on the UI thread, because
 /// XAML image sources are DependencyObjects.
+///
+/// Scheduling. Requests go on a stack and a small pool of workers takes them newest
+/// first, because the most recent request is the tile the user is looking at right now.
+/// When a tile scrolls out of the filmstrip its request is only flagged as cancelled, not
+/// dug out of the stack; a worker that reaches a flagged request drops it unopened. So a
+/// fast fling across thousands of images costs nothing for the ones flown past, and the
+/// tiles the user stops on are served first instead of waiting behind all of them.
+/// A request that has already started is left to finish: a single thumbnail is quick,
+/// and the result is cached on the item, so it is not wasted.
 /// </summary>
 public sealed class ThumbnailService
 {
+    private sealed class Pending
+    {
+        public Pending(MediaItem item, int generation)
+        {
+            Item = item;
+            Generation = generation;
+        }
+
+        public MediaItem Item { get; }
+        public int Generation { get; }
+
+        // Both only read and written under _lock.
+        public bool Cancelled;
+        public bool Started;
+    }
+
     private readonly DispatcherQueue _dispatcher;
-    private readonly SemaphoreSlim _gate;
-    private readonly HashSet<string> _inflight = new(StringComparer.OrdinalIgnoreCase);
     private readonly uint _pixelSize;
+    private readonly int _maxWorkers;
+
+    private readonly object _lock = new();
+    // One entry per item that is queued or being loaded. Keyed by the item itself rather
+    // than its path, so a file moved while queued still finds its entry.
+    private readonly Dictionary<MediaItem, Pending> _pending = new(ReferenceEqualityComparer.Instance);
+    // Newest on top. May hold the same entry twice (re-requested after a cancel) or entries
+    // that are cancelled or already started; workers skip those when they pop them.
+    private readonly Stack<Pending> _stack = new();
+    private int _workers;
     private int _generation;
 
     public ThumbnailService(DispatcherQueue dispatcher, uint pixelSize = 256)
     {
         _dispatcher = dispatcher;
         _pixelSize = pixelSize;
-        _gate = new SemaphoreSlim(Math.Clamp(Environment.ProcessorCount / 2, 2, 8));
+        _maxWorkers = Math.Clamp(Environment.ProcessorCount / 2, 2, 8);
     }
 
     /// <summary>Abandons every pending request (call when the folder changes).</summary>
     public void Reset()
     {
-        Interlocked.Increment(ref _generation);
-        lock (_inflight) _inflight.Clear();
+        lock (_lock)
+        {
+            _generation++;
+            foreach (var entry in _pending.Values) entry.Cancelled = true;
+            _pending.Clear();
+            _stack.Clear();
+        }
     }
 
-    /// <summary>Queues a thumbnail load. Cheap and idempotent - safe to call from ElementPrepared.</summary>
+    /// <summary>
+    /// Queues a thumbnail load, ahead of everything requested earlier. Cheap and
+    /// idempotent - safe to call from ElementPrepared. Re-requesting an item that was
+    /// cancelled but not yet dropped revives it.
+    /// </summary>
     public void Request(MediaItem item)
     {
         if (item.Thumbnail is not null) return;
 
-        lock (_inflight)
+        bool startWorker = false;
+        lock (_lock)
         {
-            if (!_inflight.Add(item.Path)) return;
+            if (_pending.TryGetValue(item, out var existing))
+            {
+                if (existing.Started) return;         // already loading; let it finish
+                existing.Cancelled = false;
+                _stack.Push(existing);                 // move it back to the top
+            }
+            else
+            {
+                var entry = new Pending(item, _generation);
+                _pending.Add(item, entry);
+                _stack.Push(entry);
+            }
+
+            if (_workers < _maxWorkers)
+            {
+                _workers++;
+                startWorker = true;
+            }
         }
 
-        int generation = Volatile.Read(ref _generation);
-        _ = Task.Run(() => LoadAsync(item, generation));
+        if (startWorker) _ = Task.Run(WorkAsync);
     }
 
-    private async Task LoadAsync(MediaItem item, int generation)
+    /// <summary>
+    /// Says the item's thumbnail is no longer wanted (its tile left the filmstrip). If no
+    /// worker has started on it yet it will be skipped; otherwise this does nothing.
+    /// </summary>
+    public void Cancel(MediaItem item)
     {
-        await _gate.WaitAsync().ConfigureAwait(false);
+        lock (_lock)
+        {
+            if (_pending.TryGetValue(item, out var entry) && !entry.Started)
+                entry.Cancelled = true;
+        }
+    }
+
+    /// <summary>One worker: takes the newest live request until there are none left.</summary>
+    private async Task WorkAsync()
+    {
+        while (true)
+        {
+            Pending? next = null;
+            lock (_lock)
+            {
+                while (_stack.Count > 0)
+                {
+                    var candidate = _stack.Pop();
+                    if (candidate.Started) continue;  // a duplicate of one already taken
+
+                    if (candidate.Cancelled || candidate.Generation != _generation ||
+                        candidate.Item.Thumbnail is not null)
+                    {
+                        // Dropped. Forget it only if the map still points at this very entry
+                        // (after a Reset it may hold a newer one for the same item).
+                        if (_pending.TryGetValue(candidate.Item, out var current) &&
+                            ReferenceEquals(current, candidate))
+                            _pending.Remove(candidate.Item);
+                        continue;
+                    }
+
+                    candidate.Started = true;
+                    next = candidate;
+                    break;
+                }
+
+                if (next is null)
+                {
+                    // Decided under the lock, so a Request racing with this sees either a
+                    // worker that will still pop its entry or a free worker slot.
+                    _workers--;
+                    return;
+                }
+            }
+
+            try
+            {
+                await LoadAsync(next).ConfigureAwait(false);
+            }
+            finally
+            {
+                lock (_lock)
+                {
+                    if (_pending.TryGetValue(next.Item, out var current) && ReferenceEquals(current, next))
+                        _pending.Remove(next.Item);
+                }
+            }
+        }
+    }
+
+    private bool IsCurrentGeneration(int generation)
+    {
+        lock (_lock) return generation == _generation;
+    }
+
+    private async Task LoadAsync(Pending request)
+    {
+        var item = request.Item;
         try
         {
-            if (generation != Volatile.Read(ref _generation)) return;
-
             var loaded = await MediaImageSource.OpenAsync(item.Path, _pixelSize).ConfigureAwait(false);
             if (loaded is null) return;
 
-            if (generation != Volatile.Read(ref _generation))
+            if (!IsCurrentGeneration(request.Generation))
             {
                 loaded.Value.Stream.Dispose();
                 return;
@@ -85,11 +213,6 @@ public sealed class ThumbnailService
         catch (Exception ex)
         {
             System.Diagnostics.Debug.WriteLine($"[Thumbnail] {item.FileName}: {ex.Message}");
-        }
-        finally
-        {
-            lock (_inflight) _inflight.Remove(item.Path);
-            _gate.Release();
         }
     }
 

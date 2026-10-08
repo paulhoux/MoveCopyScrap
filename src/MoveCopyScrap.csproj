@@ -63,6 +63,9 @@
     <!-- Floating version: picks up the newest installed/available 1.7.x so the
          build does not break on an exact patch number. Pin it if you prefer. -->
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.7.*" />
+    <!-- Draws video frames ourselves (frame-server mode) instead of using
+         MediaPlayerElement, which could freeze on the first frame in the carousel. -->
+    <PackageReference Include="Microsoft.Graphics.Win2D" Version="1.3.*" />
   </ItemGroup>
 
   <ItemGroup>

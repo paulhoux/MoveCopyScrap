@@ -288,12 +288,35 @@ public sealed partial class MainWindow : Window
         FilmstripScroller.ChangeView(Math.Clamp(target, 0, max), null, null, disableAnimation: !animate);
     }
 
+    // Thumbnails this many places either side of the current image are always wanted,
+    // whether or not their filmstrip tile happens to be realised.
+    private const int ThumbnailPrefetchRadius = 12;
+
     /// <summary>Warms the thumbnail cache around the current position.</summary>
     private void PrefetchThumbnails()
     {
-        int from = Math.Max(0, _currentIndex - 12);
-        int to = Math.Min(_items.Count - 1, _currentIndex + 12);
+        int from = Math.Max(0, _currentIndex - ThumbnailPrefetchRadius);
+        int to = Math.Min(_items.Count - 1, _currentIndex + ThumbnailPrefetchRadius);
         for (int i = from; i <= to; i++) _thumbnails.Request(_items[i]);
+    }
+
+    /// <summary>
+    /// A tile has scrolled out of the filmstrip: if its thumbnail has not started loading,
+    /// drop it, so a fast scroll does not leave the tiles now on screen queued behind every
+    /// tile flown past. Items around the current image are kept; they were prefetched on
+    /// purpose and are about to be needed.
+    /// </summary>
+    private void OnFilmstripElementClearing(ItemsRepeater sender, ItemsRepeaterElementClearingEventArgs args)
+    {
+        // ItemsRepeater sets each element's DataContext to its item, and it is still in
+        // place while ElementClearing runs.
+        if ((args.Element as FrameworkElement)?.DataContext is not MediaItem item) return;
+
+        int index = _items.IndexOf(item);
+        if (index >= 0 && _currentIndex >= 0 && Math.Abs(index - _currentIndex) <= ThumbnailPrefetchRadius)
+            return;
+
+        _thumbnails.Cancel(item);
     }
 
     private void OnFilmstripElementPrepared(ItemsRepeater sender, ItemsRepeaterElementPreparedEventArgs args)
