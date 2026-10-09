@@ -291,6 +291,7 @@ public sealed partial class MainWindow
             (p.Group.Action is "Copy" or "Move" ? $" to {p.Group.Destination}" : "")));
         if (plans.Any(p => p.Group.Action == "Delete"))
             summary += recycle ? "\n\nDeleted files will go to the Recycle Bin." : "\n\nDeleted files will be removed PERMANENTLY. There is no Recycle Bin for this folder.";
+        summary += CompanionNote(plans.SelectMany(p => p.Items));
         if (!await ConfirmAsync("Organise these groups?", summary, "Organise")) return;
 
         var aggregate = new FileOperationResult();

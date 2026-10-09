@@ -542,7 +542,8 @@ public sealed partial class MainWindow : Window
         bool confirmed = await ConfirmAsync(
             $"Move {marked.Count} file{(marked.Count == 1 ? "" : "s")}?",
             $"The marked files will be moved out of this folder into:\n\n{destination}\n\n" +
-            "They will disappear from the carousel and their marks will be cleared.",
+            "They will disappear from the carousel and their marks will be cleared." +
+            CompanionNote(marked),
             "Move");
 
         if (!confirmed) return;
@@ -572,6 +573,7 @@ public sealed partial class MainWindow : Window
             ? $"{marked.Count} file{(marked.Count == 1 ? "" : "s")} will be moved to the Recycle Bin."
             : $"This folder is on a network or removable location with no Recycle Bin.\n\n" +
               $"{marked.Count} file{(marked.Count == 1 ? "" : "s")} will be deleted PERMANENTLY and cannot be recovered.";
+        body += CompanionNote(marked);
 
         bool confirmed = await ConfirmAsync(
             recycle ? $"Delete {marked.Count} file{(marked.Count == 1 ? "" : "s")}?"
@@ -588,6 +590,26 @@ public sealed partial class MainWindow : Window
         RemoveItems(result.Completed);
         Report(recycle ? "Moved to the Recycle Bin" : "Deleted", result, null);
         RootGrid.Focus(FocusState.Programmatic);
+    }
+
+    /// <summary>
+    /// A line for the confirmation dialogs when some of the items are more than one file,
+    /// so nobody is surprised that the RAW went too. Empty when there is nothing to say.
+    /// </summary>
+    private static string CompanionNote(IEnumerable<MediaItem> items)
+    {
+        int pairs = 0, extras = 0;
+        foreach (var item in items)
+        {
+            if (item.PairedRawFormat is not null) pairs++;
+            extras += item.CompanionPaths.Count;
+        }
+
+        if (extras == 0) return "";
+        if (pairs == 0) return "\n\nRAW files take their .xmp sidecar files with them.";
+
+        return $"\n\n{pairs} of these {(pairs == 1 ? "is a RAW+JPEG pair" : "are RAW+JPEG pairs")}: " +
+               "the RAW file and any .xmp sidecar files go with the JPEG.";
     }
 
     private void RemoveItems(IReadOnlyList<MediaItem> removed)
@@ -966,11 +988,14 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        string size = item.SizeBytes >= 1024 * 1024
-            ? $"{item.SizeBytes / 1024.0 / 1024.0:0.#} MB"
-            : $"{Math.Max(1, item.SizeBytes / 1024)} KB";
+        long bytes = item.TotalSizeBytes;
+        string size = bytes >= 1024 * 1024
+            ? $"{bytes / 1024.0 / 1024.0:0.#} MB"
+            : $"{Math.Max(1, bytes / 1024)} KB";
 
-        CaptionText.Text = $"{item.FileName}    ·    {size}    ·    {item.LastWriteUtc.ToLocalTime():g}" +
+        string name = item.PairedRawFormat is { } raw ? $"{item.FileName} + {raw}" : item.FileName;
+
+        CaptionText.Text = $"{name}    ·    {size}    ·    {item.LastWriteUtc.ToLocalTime():g}" +
                            (item.IsMarked ? $"    ·    {item.GroupName}" : "") +
                            (item.PendingDiskSteps != 0 ? "    ·    rotated, saving shortly" : "");
     }

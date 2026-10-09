@@ -40,7 +40,45 @@ public sealed class MediaItem : INotifyPropertyChanged
         FileName = System.IO.Path.GetFileName(path);
         IsVideo = isVideo;
         SizeBytes = sizeBytes;
+        TotalSizeBytes = sizeBytes;
         LastWriteUtc = lastWriteUtc;
+    }
+
+    // ---- companion files -------------------------------------------------
+    //
+    // A RAW+JPEG pair is one item: the JPEG is what we show (it opens fast and already has
+    // the camera's colours and orientation) and the RAW travels with it. Edit sidecars that
+    // belong to a RAW (DSC01234.xmp, DSC01234.ARW.xmp) travel with it too. Copy, move and
+    // delete always act on Path plus every companion, so a pair is never split up.
+
+    private readonly List<string> _companionPaths = new();
+
+    /// <summary>Files that go wherever this one goes: a paired RAW, RAW sidecars.</summary>
+    public IReadOnlyList<string> CompanionPaths => _companionPaths;
+
+    /// <summary>The shown file first, then its companions.</summary>
+    public IEnumerable<string> AllPaths
+    {
+        get
+        {
+            yield return Path;
+            foreach (var companion in _companionPaths) yield return companion;
+        }
+    }
+
+    /// <summary>Format of the paired RAW, e.g. "ARW", or null when this is not a pair.</summary>
+    public string? PairedRawFormat { get; private set; }
+
+    /// <summary>Size of this file plus its companions.</summary>
+    public long TotalSizeBytes { get; private set; }
+
+    /// <summary>Called by the scanner, before the item is shown.</summary>
+    internal void AddCompanion(string path, long sizeBytes, bool isPairedRaw)
+    {
+        _companionPaths.Add(path);
+        TotalSizeBytes += sizeBytes;
+        if (isPairedRaw)
+            PairedRawFormat = System.IO.Path.GetExtension(path).TrimStart('.').ToUpperInvariant();
     }
 
     public string Path { get; private set; }

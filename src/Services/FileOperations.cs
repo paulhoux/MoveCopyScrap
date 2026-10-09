@@ -70,26 +70,20 @@ public static class FileOperations
                 ct.ThrowIfCancellationRequested();
                 var item = items[i];
 
+                // An item may be several files (a RAW+JPEG pair, sidecars). They go together
+                // or not at all: if one fails, the ones already done are put back.
+                var sources = item.AllPaths.ToList();
+                var done = new List<(string From, string To)>(sources.Count);
+
                 try
                 {
-                    string target = UniqueDestination(destination, item.FileName);
+                    var targets = UniqueDestinations(destination, sources.Select(p => Path.GetFileName(p)!).ToList());
 
-                    if (move)
+                    for (int k = 0; k < sources.Count; k++)
                     {
-                        try
-                        {
-                            File.Move(item.Path, target);
-                        }
-                        catch (IOException)
-                        {
-                            // Different volume, or a provider that does not support rename: fall back.
-                            File.Copy(item.Path, target, overwrite: false);
-                            File.Delete(item.Path);
-                        }
-                    }
-                    else
-                    {
-                        File.Copy(item.Path, target, overwrite: false);
+                        if (move) MoveFile(sources[k], targets[k]);
+                        else File.Copy(sources[k], targets[k], overwrite: false);
+                        done.Add((sources[k], targets[k]));
                     }
 
                     result.Succeeded++;
@@ -97,6 +91,19 @@ public static class FileOperations
                 }
                 catch (Exception ex)
                 {
+                    for (int k = done.Count - 1; k >= 0; k--)
+                    {
+                        try
+                        {
+                            if (move) MoveFile(done[k].To, done[k].From);
+                            else File.Delete(done[k].To);
+                        }
+                        catch
+                        {
+                            // Best effort; the error below still reports the item as failed.
+                        }
+                    }
+
                     result.Failures.Add((item.FileName, ex.Message));
                 }
 
@@ -124,14 +131,19 @@ public static class FileOperations
 
             try
             {
-                if (useRecycleBin)
+                // Companions first and the shown file last: if something fails part-way,
+                // the item keeps the file it is shown by and stays in the list.
+                foreach (var path in item.CompanionPaths.Append(item.Path))
                 {
-                    var file = await StorageFile.GetFileFromPathAsync(item.Path);
-                    await file.DeleteAsync(StorageDeleteOption.Default);
-                }
-                else
-                {
-                    await Task.Run(() => File.Delete(item.Path), ct).ConfigureAwait(true);
+                    if (useRecycleBin)
+                    {
+                        var file = await StorageFile.GetFileFromPathAsync(path);
+                        await file.DeleteAsync(StorageDeleteOption.Default);
+                    }
+                    else
+                    {
+                        await Task.Run(() => File.Delete(path), ct).ConfigureAwait(true);
+                    }
                 }
 
                 result.Succeeded++;
@@ -146,6 +158,48 @@ public static class FileOperations
         }
 
         return result;
+    }
+
+    private static void MoveFile(string from, string to)
+    {
+        try
+        {
+            File.Move(from, to);
+        }
+        catch (IOException) when (!File.Exists(to))
+        {
+            // Different volume, or a provider that does not support rename: fall back.
+            File.Copy(from, to, overwrite: false);
+            File.Delete(from);
+        }
+    }
+
+    /// <summary>
+    /// Non-colliding paths for a set of files that belong together, all given the same
+    /// " (n)" suffix so they still match up afterwards. The suffix goes right after the
+    /// shared base name, so DSC01234.JPG, DSC01234.ARW and DSC01234.ARW.xmp become
+    /// DSC01234 (2).JPG, DSC01234 (2).ARW and DSC01234 (2).ARW.xmp.
+    /// </summary>
+    public static List<string> UniqueDestinations(string folder, IReadOnlyList<string> fileNames)
+    {
+        if (fileNames.Count == 1) return new List<string> { UniqueDestination(folder, fileNames[0]) };
+
+        string stem = Path.GetFileNameWithoutExtension(fileNames[0]);
+
+        string Rename(string name, string suffix) =>
+            name.StartsWith(stem + ".", StringComparison.OrdinalIgnoreCase)
+                ? stem + suffix + name[stem.Length..]
+                : Path.GetFileNameWithoutExtension(name) + suffix + Path.GetExtension(name);
+
+        for (int n = 1; n < 10000; n++)
+        {
+            string suffix = n == 1 ? "" : $" ({n})";
+            var candidates = fileNames.Select(name => Path.Combine(folder, Rename(name, suffix))).ToList();
+            if (candidates.All(c => !File.Exists(c))) return candidates;
+        }
+
+        string unique = $" ({Guid.NewGuid():N})";
+        return fileNames.Select(name => Path.Combine(folder, Rename(name, unique))).ToList();
     }
 
     /// <summary>Returns a non-colliding path, appending " (2)", " (3)", ... as needed.</summary>

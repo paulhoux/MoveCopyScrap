@@ -312,14 +312,20 @@ internal static class MediaImageSource
             return null;
         }
 
+        bool isRaw = MediaScanner.IsRaw(path);
+
         // 1. Shell thumbnail cache (fast, and the only source of video poster frames).
         try
         {
             var thumbnail = await file.GetThumbnailAsync(
                 ThumbnailMode.SingleItem, pixelSize, ThumbnailOptions.ResizeThumbnail);
 
-            if (thumbnail is not null && thumbnail.Size > 0)
-                return new MediaImagePayload(thumbnail, thumbnail.OriginalWidth, thumbnail.OriginalHeight, 0);
+            // Without a RAW codec the shell answers with the file-type icon instead of a
+            // picture; that is no use as a thumbnail, so carry on to the preview below.
+            bool usable = thumbnail is not null && thumbnail.Size > 0 &&
+                          (!isRaw || thumbnail.Type == ThumbnailType.Image);
+            if (usable)
+                return new MediaImagePayload(thumbnail!, thumbnail!.OriginalWidth, thumbnail.OriginalHeight, 0);
 
             thumbnail?.Dispose();
         }
@@ -353,7 +359,9 @@ internal static class MediaImageSource
         catch
         {
             stream?.Dispose();
-            return null;
+
+            // 3. No codec for this RAW: use the JPEG preview the camera embedded in it.
+            return isRaw ? await RawPreview.OpenAsync(path, pixelSize).ConfigureAwait(false) : null;
         }
     }
 }

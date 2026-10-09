@@ -45,6 +45,27 @@ dotnet run --project tests/GroupStateChecks/GroupStateChecks.csproj
 
 ---
 
+## RAW Files
+
+Camera RAW files (Sony ARW, Canon CR2/CR3, Nikon NEF, DNG, Fujifilm RAF, Olympus ORF,
+Panasonic RW2 and more) are shown alongside everything else.
+
+* With Microsoft's free **Raw Image Extension** (Microsoft Store) installed, Windows decodes
+  them, and thumbnails come from the Windows thumbnail cache like any other picture.
+* Without it, the JPEG preview the camera embedded in the file is shown instead, turned
+  upright using the RAW's orientation tag. That preview is usually smaller than the full
+  image, but plenty for culling.
+
+**RAW+JPEG pairs.** When a RAW and a JPEG (or HEIC) have the same name, as cameras write
+them in RAW+JPEG mode (`DSC01234.ARW` + `DSC01234.JPG`), they are one item: the JPEG is
+shown, the caption reads `DSC01234.JPG + ARW`, and marking, copying, moving and deleting
+always take both files. Edit sidecars belonging to a RAW (`DSC01234.xmp` from Lightroom or
+Capture One, `DSC01234.ARW.xmp` from darktable) go with it too. If one file of an item
+cannot be copied or moved, the others are put back, so a pair is never split. When the
+destination already has the name, all files get the same `(2)` suffix.
+
+Rotating a pair turns the JPEG only; the RAW file is never modified.
+
 ## Quick start
 
 Double-click **`build.bat`**, or from a terminal:
