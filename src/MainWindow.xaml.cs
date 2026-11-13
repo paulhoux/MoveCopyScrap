@@ -85,6 +85,7 @@ public sealed partial class MainWindow : Window
 
         UpdateCommandState();
         UpdateCaption();
+        InitUpdates();
     }
 
     // ---- window plumbing -------------------------------------------------
@@ -170,6 +171,7 @@ public sealed partial class MainWindow : Window
         Carousel.ReleaseMedia();
         _markStore?.Dispose();
         _markStore = null;
+        FinishUpdatesOnClose();
     }
 
     // ---- folder loading --------------------------------------------------

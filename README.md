@@ -162,7 +162,45 @@ cmake --build build --config Release --target run
 
 ### Making something to hand out
 
-An installer, which is the friendliest thing to send someone:
+A release with an installer that keeps itself up to date, made with
+[Velopack](https://velopack.io) and published on this repository's GitHub releases:
+
+```powershell
+# Raise VERSION in CMakeLists.txt, commit, then:
+git tag v1.3.0
+git push origin <branch> v1.3.0
+.\release.ps1
+```
+
+`release.ps1` builds an x64 Release, packs it, and uploads
+`MoveCopyScrap.App-win-Setup.exe` plus the update packages as release `v1.3.0`. It
+needs the .NET SDK (it fetches the `vpk` tool itself) and the GitHub CLI, signed in
+with `gh auth login`. `.\release.ps1 -Test` packs into `build\releases` without
+uploading anything.
+
+The Setup installs per-user into `%LOCALAPPDATA%\MoveCopyScrap.App` with no UAC prompt,
+adds a Start Menu shortcut and an entry in Add/Remove Programs. Updates are never checked
+on their own: **Check for updates**, at the right of the button bar, looks on GitHub and
+downloads a newer version (only the changed files, once a previous Velopack release
+exists). The button then turns into **Restart to update**; if you carry on instead, the
+update is installed when the app is closed. In a copy run from `build\` or a zip, which
+cannot update itself, the button is greyed out.
+
+Marks and settings stay in `%LOCALAPPDATA%\MoveCopyScrap`, separate from the install
+folder, so they survive uninstalling, and reinstalling finds them again. Moving from the
+older Inno Setup installer: uninstall it (answer **No** when it asks whether to delete
+your saved marks), then run the new Setup; your marks are picked up as they are.
+
+To take back a bad release, so installed copies return to the previous one:
+
+```powershell
+.\rollback.ps1 -Version 1.3.0         # mark it pre-release (reversible: -Undo)
+.\rollback.ps1 -Version 1.3.0 -Delete # or delete it for good
+```
+
+Then release the fix as a new, higher version.
+
+The older Inno Setup installer can still be built, for a copy that does not update:
 
 ```powershell
 .\build.bat -Installer

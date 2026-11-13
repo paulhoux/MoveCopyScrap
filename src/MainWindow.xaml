@@ -189,6 +189,19 @@
                                 </Flyout>
                             </Button.Flyout>
                         </Button>
+
+                        <Border Width="1" Height="22" Margin="6,0"
+                                Background="{StaticResource AppSubtleBorderBrush}" />
+
+                        <!-- Updates (MainWindow.Updates.cs): accent-coloured to stand apart. -->
+                        <Button x:Name="UpdateButton" Style="{StaticResource CommandButtonStyle}"
+                                Foreground="{StaticResource AppAccentBrush}" Background="#265AA9FF"
+                                Click="OnUpdateClick">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <FontIcon x:Name="UpdateGlyph" Glyph="&#xE895;" FontSize="15" />
+                                <TextBlock x:Name="UpdateText" Text="Check for updates" />
+                            </StackPanel>
+                        </Button>
                     </StackPanel>
                 </Grid>
             </Grid>

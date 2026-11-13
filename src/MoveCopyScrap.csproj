@@ -66,7 +66,14 @@
     <!-- Draws video frames ourselves (frame-server mode) instead of using
          MediaPlayerElement, which could freeze on the first frame in the carousel. -->
     <PackageReference Include="Microsoft.Graphics.Win2D" Version="1.3.*" />
+    <!-- Installer and automatic updates. Pinned: it must match the vpk tool release.ps1 uses. -->
+    <PackageReference Include="Velopack" Version="1.2.161" />
   </ItemGroup>
+
+  <PropertyGroup>
+    <!-- Program.cs has the entry point, so Velopack can run before WinUI starts. -->
+    <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
+  </PropertyGroup>
 
   <ItemGroup>
     <!-- A loose copy next to the exe, so AppWindow.SetIcon() can give the window and its
