@@ -179,6 +179,9 @@ internal sealed class SonyLensCorrection
 /// does the same. Measured on an RX10 III at 9, 15 and 90 mm, the result lines up with
 /// the camera JPEG across the whole frame.
 ///
+/// Lined up like that, the camera's JPEG then also supplies the colours: see
+/// <see cref="CameraColourMatch"/>.
+///
 /// Only Sony is supported so far; anything else reports <see cref="Outcome.NotPossible"/>
 /// and the caller keeps showing the camera's embedded JPEG.
 /// </summary>
@@ -286,7 +289,22 @@ internal static class RawDevelop
             decoded.CopyToBuffer(source.AsBuffer());
         }
 
-        byte[] output = await Task.Run(() => Warp(source, srcW, srcH, outW, outH, correction)).ConfigureAwait(false);
+        var camera = await DecodeCameraJpegAsync(path).ConfigureAwait(false);
+
+        byte[] output = await Task.Run(() =>
+        {
+            var pixels = Warp(source, srcW, srcH, outW, outH, correction);
+
+            // Give it the camera's colours, learnt from the camera's own JPEG of this
+            // shot. Only when that JPEG shows the same frame (same aspect ratio).
+            if (camera is { } jpeg &&
+                Math.Abs(jpeg.Width / (double)jpeg.Height - fullW / (double)fullH) < 0.01)
+            {
+                var ours = Warp(source, srcW, srcH, jpeg.Width, jpeg.Height, correction);
+                CameraColourMatch.Fit(ours, jpeg.Pixels, jpeg.Width, jpeg.Height)?.ApplyInPlace(pixels, outW, outH);
+            }
+            return pixels;
+        }).ConfigureAwait(false);
 
         var stream = new InMemoryRandomAccessStream();
         try
@@ -303,6 +321,29 @@ internal static class RawDevelop
         {
             stream.Dispose();
             throw;
+        }
+    }
+
+    /// <summary>The camera's embedded JPEG, upright, as BGRA pixels; null if there is none.</summary>
+    private static async Task<(byte[] Pixels, int Width, int Height)?> DecodeCameraJpegAsync(string path)
+    {
+        try
+        {
+            var payload = await RawPreview.OpenAsync(path, 0).ConfigureAwait(false);
+            if (payload is not { } preview) return null;
+            using var stream = preview.Stream;
+
+            var decoder = await BitmapDecoder.CreateAsync(stream);
+            using var bitmap = await decoder.GetSoftwareBitmapAsync(
+                BitmapPixelFormat.Bgra8, BitmapAlphaMode.Ignore, new BitmapTransform(),
+                ExifOrientationMode.RespectExifOrientation, ColorManagementMode.DoNotColorManage);
+            var pixels = new byte[bitmap.PixelWidth * bitmap.PixelHeight * 4];
+            bitmap.CopyToBuffer(pixels.AsBuffer());
+            return (pixels, bitmap.PixelWidth, bitmap.PixelHeight);
+        }
+        catch
+        {
+            return null;
         }
     }
 

@@ -60,10 +60,13 @@ Panasonic RW2 and more) are shown alongside everything else.
 * **Sony, full resolution.** When fill mode needs more pixels than the preview has (usually
   1616 px wide), a Sony ARW is developed from the sensor data instead, in the background:
   decoded by the Raw Image Extension, then corrected with the distortion and vignetting
-  curves the camera stored in the file, so the framing matches the camera's. It takes
-  about a second; the preview stays up until it is ready. Colours are Windows' rendering,
-  not the camera's, so they differ a little from the preview. Other makes, and Sony
-  without the Raw Image Extension, show the preview at its full size.
+  curves the camera stored in the file, so the framing matches the camera's. The colours
+  are then matched to the camera's: with the two lined up pixel for pixel, a colour table
+  is fitted from the RAW to the preview of the same shot and applied at full resolution.
+  On the test shots that brings it within about 1.5 - 3.5 dE of the camera's JPEG (from
+  7 - 17 for Windows' own rendering), while keeping the RAW's detail. It takes one to two
+  seconds; the preview stays up until it is ready. Other makes, and Sony without the Raw
+  Image Extension, show the preview at its full size.
 
   The distortion correction was checked against the camera's JPEG on an RX10 III at 9, 15
   and 90 mm. The vignetting correction follows darktable's reading of Sony's data and has
@@ -402,6 +405,7 @@ src/
     ImageLoader.cs           Decode-to-display-size, LRU cache
     RawPreview.cs            The JPEG preview embedded in a RAW
     RawDevelop.cs            Full-resolution Sony RAW with the camera's lens corrections
+    CameraColourMatch.cs     Per-photo colour table learnt from the camera's JPEG
     MarkStore.cs             Debounced atomic JSON mark state
     RotationService.cs       Lossless rotation by rewriting the EXIF orientation tag
     SettingsStore.cs         Preferences that outlive a session
