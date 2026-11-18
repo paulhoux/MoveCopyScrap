@@ -50,11 +50,24 @@ dotnet run --project tests/GroupStateChecks/GroupStateChecks.csproj
 Camera RAW files (Sony ARW, Canon CR2/CR3, Nikon NEF, DNG, Fujifilm RAF, Olympus ORF,
 Panasonic RW2 and more) are shown alongside everything else.
 
-* With Microsoft's free **Raw Image Extension** (Microsoft Store) installed, Windows decodes
-  them, and thumbnails come from the Windows thumbnail cache like any other picture.
-* Without it, the JPEG preview the camera embedded in the file is shown instead, turned
-  upright using the RAW's orientation tag. That preview is usually smaller than the full
-  image, but plenty for culling.
+* The picture is the JPEG preview the camera embedded in the file, turned upright using the
+  RAW's orientation tag. It looks the way the camera rendered it, lens corrections
+  included, and loads instantly. Thumbnails come from the Windows thumbnail cache.
+* Windows' own RAW decoding (Microsoft's free **Raw Image Extension**, from the Microsoft
+  Store) is deliberately not used for the carousel: above about 1280 px it decodes the
+  sensor data without the camera's lens corrections, so the corners go dark and straight
+  lines bow - the same picture would change look on entering fill mode.
+* **Sony, full resolution.** When fill mode needs more pixels than the preview has (usually
+  1616 px wide), a Sony ARW is developed from the sensor data instead, in the background:
+  decoded by the Raw Image Extension, then corrected with the distortion and vignetting
+  curves the camera stored in the file, so the framing matches the camera's. It takes
+  about a second; the preview stays up until it is ready. Colours are Windows' rendering,
+  not the camera's, so they differ a little from the preview. Other makes, and Sony
+  without the Raw Image Extension, show the preview at its full size.
+
+  The distortion correction was checked against the camera's JPEG on an RX10 III at 9, 15
+  and 90 mm. The vignetting correction follows darktable's reading of Sony's data and has
+  only been seen at f/13-16, where it is under 2%; wide-open shots are untested.
 
 **RAW+JPEG pairs.** When a RAW and a JPEG (or HEIC) have the same name, as cameras write
 them in RAW+JPEG mode (`DSC01234.ARW` + `DSC01234.JPG`), they are one item: the JPEG is
@@ -387,6 +400,8 @@ src/
     MediaScanner.cs          Folder enumeration + Explorer-style natural sort
     ThumbnailService.cs      Background thumbnails, bounded concurrency
     ImageLoader.cs           Decode-to-display-size, LRU cache
+    RawPreview.cs            The JPEG preview embedded in a RAW
+    RawDevelop.cs            Full-resolution Sony RAW with the camera's lens corrections
     MarkStore.cs             Debounced atomic JSON mark state
     RotationService.cs       Lossless rotation by rewriting the EXIF orientation tag
     SettingsStore.cs         Preferences that outlive a session

@@ -917,12 +917,25 @@ public sealed class CarouselView : Grid
             int target = (int)Math.Ceiling(displayWidth * rasterScale);
             if (target <= slot.LoadedWidth) continue;
 
-            _ = LoadPictureAsync(slot, slot.Item, target);
+            // A RAW asked for at fill size may be developed from the sensor data, which
+            // takes a second. If the slot has nothing to show yet, put the camera's JPEG
+            // up first rather than an empty frame.
+            int first = slot.LoadedWidth == 0 && displayWidth > natural && MediaScanner.IsRaw(slot.Item.Path)
+                ? (int)Math.Ceiling(natural * rasterScale)
+                : 0;
+
+            _ = LoadPictureAsync(slot, slot.Item, target, first);
         }
     }
 
-    private async Task LoadPictureAsync(Slot slot, MediaItem item, int targetWidth)
+    private async Task LoadPictureAsync(Slot slot, MediaItem item, int targetWidth, int firstWidth = 0)
     {
+        if (firstWidth > 0)
+        {
+            await LoadPictureAsync(slot, item, firstWidth);
+            if (!ReferenceEquals(slot.Item, item)) return;
+        }
+
         try
         {
             var bitmap = await _loader.LoadAsync(item, targetWidth);
