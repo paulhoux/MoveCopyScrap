@@ -9,6 +9,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Hosting;
 using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Input;
 using Microsoft.UI.Xaml.Media;
 using Windows.Media.Core;
 using Windows.Media.Playback;
@@ -83,6 +84,23 @@ public sealed class CarouselView : Grid
     private bool _fillMode;
     private CarouselFillStyle _fillStyle = CarouselFillStyle.Cover;
 
+    // ---- hand zoom (fill mode, Fit style) ----------------------------------
+    //
+    // On top of the fit scale, the centre picture can be zoomed with the wheel and dragged
+    // about. _handZoom multiplies the fit scale (1 = the whole picture, as Fit shows it);
+    // _handPan is how far the picture's centre sits from the window's centre, in pixels.
+    private const double MaxHandZoom = 16;
+    private const double WheelZoomStep = 1.25;                    // per wheel notch
+    private const double DragThreshold = 4;                      // px before a press becomes a drag
+    private static readonly TimeSpan HandZoomDuration = TimeSpan.FromMilliseconds(120);
+    private static readonly TimeSpan SharperPictureDelay = TimeSpan.FromMilliseconds(250);
+    private double _handZoom = 1;
+    private Vector2 _handPan;
+    private bool _dragging, _dragMoved;
+    private Windows.Foundation.Point _dragStart;
+    private Vector2 _panAtDragStart;
+    private DispatcherQueueTimer? _sharperPictureTimer;
+
     private static readonly SolidColorBrush MarkedBorderBrush =
         new(Color.FromArgb(0xFF, 0xFF, 0xC4, 0x4D));
     private static readonly SolidColorBrush NormalBorderBrush =
@@ -111,6 +129,12 @@ public sealed class CarouselView : Grid
 
         SizeChanged += (_, _) => { Relayout(false); RequestPictures(); };
         PointerWheelChanged += OnPointerWheelChanged;
+
+        // handledEventsToo: the slots' own Tapped handling must not hide presses from us.
+        AddHandler(PointerPressedEvent, new PointerEventHandler(OnPointerPressed), true);
+        AddHandler(PointerMovedEvent, new PointerEventHandler(OnPointerMoved), true);
+        AddHandler(PointerReleasedEvent, new PointerEventHandler(OnPointerReleased), true);
+        AddHandler(PointerCaptureLostEvent, new PointerEventHandler(OnPointerReleased), true);
         Loaded += (_, _) => { EnsureInitialised(); Relayout(false); };
     }
 
@@ -144,6 +168,7 @@ public sealed class CarouselView : Grid
     {
         if (_fillStyle == style) return;
         _fillStyle = style;
+        ClearHandZoom();
 
         if (!_fillMode) return;
         StopKenBurns();
@@ -176,6 +201,7 @@ public sealed class CarouselView : Grid
 
         bool bigJump = Math.Abs(index - _currentIndex) > Wing;
         _currentIndex = index;
+        ClearHandZoom();
 
         // The outgoing picture must not keep drifting while it cross-fades out.
         if (_fillMode) StopKenBurns();
@@ -189,6 +215,7 @@ public sealed class CarouselView : Grid
     {
         if (_fillMode == fill) return;
         _fillMode = fill;
+        ClearHandZoom();
 
         StopKenBurns();
         Relayout(true);
@@ -329,6 +356,7 @@ public sealed class CarouselView : Grid
         };
 
         root.Tapped += (_, _) => OnSlotTapped(slot);
+        root.DoubleTapped += (_, _) => OnSlotDoubleTapped(slot);
         root.RightTapped += (_, e) => { e.Handled = true; OnSlotRightTapped(slot); };
 
         _stage.Children.Add(root);
@@ -467,6 +495,13 @@ public sealed class CarouselView : Grid
                 tx = 0;
                 ty = 0;
                 scale = FillScaleFor(slot.Width, slot.Height);
+                if (magnitude == 0 && IsZoomed)
+                {
+                    scale *= _handZoom;
+                    ClampHandPan(slot, scale);
+                    tx = _handPan.X;
+                    ty = _handPan.Y;
+                }
                 angle = 0;
                 opacity = magnitude == 0 ? 1 : 0;
                 slot.Frame.CornerRadius = new CornerRadius(0);
@@ -585,6 +620,8 @@ public sealed class CarouselView : Grid
         double oldHeight = slot.Height;
         double oldRootScale = _fillMode ? FillScaleFor(slot.Width, slot.Height) : 1.0;
 
+        // A turned picture has a different shape; start it again from the whole picture.
+        ClearHandZoom();
         item.Rotate(direction);
 
         // Snap straight to the finished state - new frame shape, new picture angle,
@@ -911,8 +948,9 @@ public sealed class CarouselView : Grid
             // the width to decode for is the frame's *height*.
             double natural = (slot.Item.RotationSteps & 1) != 0 ? slot.Height : slot.Width;
 
+            // Zoomed in by hand, it is drawn bigger still, and gets pixels to match.
             double displayWidth = _fillMode && magnitude == 0
-                ? natural * FillScaleFor(slot.Width, slot.Height)
+                ? natural * FillScaleFor(slot.Width, slot.Height) * _handZoom
                 : natural;
             int target = (int)Math.Ceiling(displayWidth * rasterScale);
             if (target <= slot.LoadedWidth) continue;
@@ -1325,16 +1363,161 @@ public sealed class CarouselView : Grid
 
     private void OnPointerWheelChanged(object sender, PointerRoutedEventArgs e)
     {
-        int delta = e.GetCurrentPoint(this).Properties.MouseWheelDelta;
+        var point = e.GetCurrentPoint(this);
+        int delta = point.Properties.MouseWheelDelta;
         if (delta == 0) return;
         e.Handled = true;
+
+        if (HandZoomSlot() is { } slot)
+        {
+            ZoomAt(slot, Math.Pow(WheelZoomStep, delta / 120.0), point.Position);
+            return;
+        }
+
         NavigationRequested?.Invoke(this, delta > 0 ? -1 : 1);
     }
 
     private void OnSlotTapped(Slot slot)
     {
-        if (slot.Index == _currentIndex) CenterActivated?.Invoke(this, EventArgs.Empty);
+        if (slot.Index == _currentIndex)
+        {
+            // Zoomed in, a click is the start of a drag, not a request to leave fill mode.
+            if (!IsZoomed) CenterActivated?.Invoke(this, EventArgs.Empty);
+        }
         else if (slot.Index > int.MinValue) NavigationRequested?.Invoke(this, slot.Index - _currentIndex);
+    }
+
+    // ---- hand zoom -------------------------------------------------------
+
+    /// <summary>True while the centre picture is zoomed in beyond Fit by hand.</summary>
+    public bool IsZoomed => _handZoom > 1.0001;
+
+    /// <summary>
+    /// Back to the whole picture, animated. Returns false when there was nothing to undo,
+    /// so the caller can give the key its usual meaning instead.
+    /// </summary>
+    public bool ResetZoom()
+    {
+        if (!IsZoomed) return false;
+        ClearHandZoom();
+        Relayout(animate: true);
+        return true;
+    }
+
+    /// <summary>The centre slot, when it can be zoomed by hand: a picture, in fill mode, Fit style.</summary>
+    private Slot? HandZoomSlot()
+    {
+        if (!_fillMode || _fillStyle != CarouselFillStyle.Fit) return null;
+        if (!_active.TryGetValue(_currentIndex, out var slot)) return null;
+        return slot.Item is { IsVideo: false } ? slot : null;
+    }
+
+    private void ClearHandZoom()
+    {
+        _handZoom = 1;
+        _handPan = Vector2.Zero;
+        _dragging = false;
+        UpdateZoomCursor();
+    }
+
+    /// <summary>
+    /// Zooms by <paramref name="factor"/>, keeping the point of the picture under
+    /// <paramref name="anchor"/> (in this control's coordinates) where it is.
+    /// </summary>
+    private void ZoomAt(Slot slot, double factor, Windows.Foundation.Point anchor)
+    {
+        double zoom = Math.Clamp(_handZoom * factor, 1, MaxHandZoom);
+        if (Math.Abs(zoom - _handZoom) < 1e-9) return;
+
+        // Screen = window centre + pan + offset in picture * scale. Holding the anchor
+        // fixed while the scale changes by `ratio` gives the new pan.
+        var q = new Vector2((float)(anchor.X - ActualWidth / 2), (float)(anchor.Y - ActualHeight / 2));
+        float ratio = (float)(zoom / _handZoom);
+        _handPan = q - (q - _handPan) * ratio;
+        _handZoom = zoom;
+        if (!IsZoomed) { _handZoom = 1; _handPan = Vector2.Zero; }
+
+        ApplyHandZoom(slot, animate: true);
+        RequestSharperPictureSoon();
+    }
+
+    private void ApplyHandZoom(Slot slot, bool animate)
+    {
+        double scale = FillScaleFor(slot.Width, slot.Height) * _handZoom;
+        ClampHandPan(slot, scale);
+        ApplyTransform(slot, _handPan.X, _handPan.Y, scale, 0, 1, animate, HandZoomDuration);
+        UpdateZoomCursor();
+    }
+
+    /// <summary>
+    /// Keeps the picture covering the window along any axis where it is bigger than the
+    /// window, and centred along any axis where it is not: no dragging it off into the dark.
+    /// </summary>
+    private void ClampHandPan(Slot slot, double scale)
+    {
+        double maxX = Math.Max(0, (slot.Width * scale - ActualWidth) / 2);
+        double maxY = Math.Max(0, (slot.Height * scale - ActualHeight) / 2);
+        _handPan = new Vector2(
+            (float)Math.Clamp(_handPan.X, -maxX, maxX),
+            (float)Math.Clamp(_handPan.Y, -maxY, maxY));
+    }
+
+    /// <summary>
+    /// Asks for pixels to match the new zoom once the wheel has been still for a moment,
+    /// rather than a decode for every notch on the way.
+    /// </summary>
+    private void RequestSharperPictureSoon()
+    {
+        if (_sharperPictureTimer is null)
+        {
+            _sharperPictureTimer = DispatcherQueue.CreateTimer();
+            _sharperPictureTimer.IsRepeating = false;
+            _sharperPictureTimer.Tick += (_, _) => RequestPictures();
+        }
+        _sharperPictureTimer.Stop();
+        _sharperPictureTimer.Interval = SharperPictureDelay;
+        _sharperPictureTimer.Start();
+    }
+
+    private void UpdateZoomCursor() =>
+        ProtectedCursor = IsZoomed ? InputSystemCursor.Create(InputSystemCursorShape.SizeAll) : null;
+
+    private void OnPointerPressed(object sender, PointerRoutedEventArgs e)
+    {
+        if (!IsZoomed || HandZoomSlot() is null) return;
+        var point = e.GetCurrentPoint(this);
+        if (!point.Properties.IsLeftButtonPressed) return;
+
+        _dragging = true;
+        _dragMoved = false;
+        _dragStart = point.Position;
+        _panAtDragStart = _handPan;
+        CapturePointer(e.Pointer);
+    }
+
+    private void OnPointerMoved(object sender, PointerRoutedEventArgs e)
+    {
+        if (!_dragging || HandZoomSlot() is not { } slot) return;
+
+        var position = e.GetCurrentPoint(this).Position;
+        var moved = new Vector2((float)(position.X - _dragStart.X), (float)(position.Y - _dragStart.Y));
+        if (!_dragMoved && moved.Length() < DragThreshold) return;
+
+        _dragMoved = true;
+        _handPan = _panAtDragStart + moved;
+        ApplyHandZoom(slot, animate: false);
+    }
+
+    private void OnPointerReleased(object sender, PointerRoutedEventArgs e)
+    {
+        if (!_dragging) return;
+        _dragging = false;
+        ReleasePointerCapture(e.Pointer);
+    }
+
+    private void OnSlotDoubleTapped(Slot slot)
+    {
+        if (slot.Index == _currentIndex) ResetZoom();
     }
 
     private void OnSlotRightTapped(Slot slot)

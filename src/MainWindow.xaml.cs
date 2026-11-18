@@ -941,7 +941,9 @@ public sealed partial class MainWindow : Window
                 break;
 
             case VirtualKey.Escape:
-                if (_fillMode) { SetFillMode(false); e.Handled = true; }
+                // Zoomed in by hand: first back to the whole picture, then out of fill mode.
+                if (Carousel.ResetZoom()) e.Handled = true;
+                else if (_fillMode) { SetFillMode(false); e.Handled = true; }
                 break;
 
             case VirtualKey.F11:

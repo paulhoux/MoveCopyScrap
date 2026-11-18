@@ -323,7 +323,7 @@ solution CMake generates) in Visual Studio 2022, set the platform to **x64**, an
 | `Ctrl+left` / `Ctrl+right` | Rotate the current image a quarter turn anticlockwise / clockwise |
 | `F` or `Enter` | Fill the window (side images fade out, Ken Burns drift starts) |
 | `K` | In fill mode: fit the whole image, or fill the window |
-| `Esc` | Leave fill mode |
+| `Esc` | Zoomed in: back to the whole picture. Otherwise: leave fill mode |
 | `F11` | Real full screen |
 | `Ctrl+O` | Open a folder |
 | `Ctrl+C` | Copy marked files to another folder |
@@ -333,6 +333,15 @@ solution CMake generates) in Visual Studio 2022, set the platform to **x64**, an
 Mouse: the wheel steps through images, clicking a side image jumps to it, clicking the
 centre image toggles fill mode, right-clicking the centre image marks it, and clicking a
 thumbnail jumps straight there.
+
+In fill mode with the **Fit** style, the wheel zooms instead: towards the point under the
+pointer, up to 16x. Drag to look around; the picture stops at its edges rather than
+sliding off into the dark. Double-click or `Esc` goes back to the whole picture, and the
+arrow keys still step to the next one (which starts whole again). While zoomed, a single
+click does not leave fill mode, so a click to start a drag never throws you out. Once the
+wheel is still for a moment, the picture is decoded again at the size it is now drawn,
+which for a Sony RAW means the full-resolution develop. Videos keep the wheel for
+stepping through images.
 
 ### Rotation
 
@@ -502,7 +511,8 @@ Fill mode has two styles, toggled with `K` or the floating control that appears 
 it is the only visible chrome):
 
 * **Fill** — covers the window, crops what does not fit, and drifts across the crop.
-* **Fit** — shows the whole image, letterboxed, perfectly still.
+* **Fit** — shows the whole image, letterboxed, perfectly still; the wheel zooms in and a
+  drag pans (see *Using it*).
 
 They are one setting rather than two, because once nothing is cropped the pan has nowhere
 to travel; `CarouselView.FillScaleFor` is the single place that decides `max` versus `min`,
@@ -537,5 +547,6 @@ a debugger, or temporarily set `e.Handled = false` in `App.xaml.cs`.
 ## Known gaps
 
 * HEIC / AVIF / some MKV files need the Microsoft Store codec packs to render.
-* Fill mode does not zoom or pan by hand yet; the Ken Burns drift is automatic.
+* Zooming by hand is in Fit only; Fill keeps its automatic Ken Burns drift. There is no
+  pinch-to-zoom for touch screens yet.
 * The folder is scanned once, non-recursively; there is no file-system watcher.
