@@ -59,8 +59,9 @@ Panasonic RW2 and more) are shown alongside everything else.
   lines bow - the same picture would change look on entering fill mode.
 * **Sony, full resolution.** When fill mode needs more pixels than the preview has (usually
   1616 px wide), a Sony ARW is developed from the sensor data instead, in the background:
-  decoded by the Raw Image Extension, then corrected with the distortion and vignetting
-  curves the camera stored in the file, so the framing matches the camera's. The colours
+  decoded by the Raw Image Extension, then corrected with the distortion, vignetting and
+  chromatic aberration curves the camera stored in the file, so the framing matches the
+  camera's and high-contrast edges lose their red and cyan fringes. The colours
   are then matched to the camera's: with the two lined up pixel for pixel, a colour table
   is fitted from the RAW to the preview of the same shot and applied at full resolution.
   On the test shots that brings it within about 1.5 - 3.5 dE of the camera's JPEG (from
@@ -69,8 +70,10 @@ Panasonic RW2 and more) are shown alongside everything else.
   Image Extension, show the preview at its full size.
 
   The distortion correction was checked against the camera's JPEG on an RX10 III at 9, 15
-  and 90 mm. The vignetting correction follows darktable's reading of Sony's data and has
-  only been seen at f/13-16, where it is under 2%; wide-open shots are untested.
+  and 90 mm. The chromatic aberration correction was checked on the same shots by
+  measuring how far red and blue sit from green: up to 4.4 px at 3840 px wide before,
+  about 1 px after. The vignetting correction follows darktable's reading of Sony's data
+  and has only been seen at f/13-16, where it is under 2%; wide-open shots are untested.
 
 **RAW+JPEG pairs.** When a RAW and a JPEG (or HEIC) have the same name, as cameras write
 them in RAW+JPEG mode (`DSC01234.ARW` + `DSC01234.JPG`), they are one item: the JPEG is

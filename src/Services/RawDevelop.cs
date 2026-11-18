@@ -19,10 +19,27 @@ internal sealed class SonyLensCorrection
     /// <summary>Light reaching the sensor per knot, relative to the centre (1 = no falloff), or null.</summary>
     public float[]? Vignetting { get; init; }
 
+    /// <summary>
+    /// Lateral chromatic aberration: red's and blue's source radius relative to green's,
+    /// per knot (1 = drawn at the same size as green), or null.
+    /// </summary>
+    public float[]? ChromaticRed { get; init; }
+
+    /// <inheritdoc cref="ChromaticRed"/>
+    public float[]? ChromaticBlue { get; init; }
+
     private const ushort TagMake = 0x010F;
     private const ushort TagSubIfds = 0x014A;
     private const ushort TagVignettingParams = 0x7032;
+    private const ushort TagChromaticParams = 0x7035;
     private const ushort TagDistortionParams = 0x7037;
+
+    // Units of the chromatic aberration knots, as a fraction of the radius. Measured: on
+    // RX10 III shots at 9, 15 and 90 mm, the radial scale that lines red and blue up with
+    // green best was found before and after correcting with 2^-21 and with 2^-20. 2^-20
+    // took the misregistration from up to 4.4 px (at 3840 px wide) down to about 1 px;
+    // 2^-21 only halved it.
+    private const float ChromaticUnit = 1f / (1 << 20);
 
     /// <summary>
     /// Reads the correction curves from a Sony ARW, or returns null when the file is not a
@@ -48,15 +65,26 @@ internal sealed class SonyLensCorrection
             if (make is null || !make.StartsWith("SONY", StringComparison.OrdinalIgnoreCase) || subIfd == 0)
                 return null;
 
-            short[]? distortion = null, vignetting = null;
+            short[]? distortion = null, vignetting = null, chromatic = null;
             foreach (var entry in tiff.Entries(subIfd))
             {
                 if (entry.Tag == TagDistortionParams) distortion = tiff.Shorts(entry);
                 else if (entry.Tag == TagVignettingParams) vignetting = tiff.Shorts(entry);
+                else if (entry.Tag == TagChromaticParams) chromatic = tiff.Shorts(entry);
             }
 
             float[]? distortionKnots = Knots(distortion);
             if (distortionKnots is null) return null;
+
+            // Chromatic aberration: one list, the red knots followed by the blue ones.
+            float[]? chromaticKnots = Knots(chromatic);
+            float[]? red = null, blue = null;
+            if (chromaticKnots is { Length: >= 4 } && chromaticKnots.Length % 2 == 0)
+            {
+                int half = chromaticKnots.Length / 2;
+                red = chromaticKnots.Take(half).Select(v => 1f + v * ChromaticUnit).ToArray();
+                blue = chromaticKnots.Skip(half).Select(v => 1f + v * ChromaticUnit).ToArray();
+            }
 
             // Both encodings as darktable reads them. Distortion: radius multiplier is
             // 1 + v / 2^14. Vignetting: transmission is 2^(0.5 - 2^(v / 2^13 - 1)), which is
@@ -64,7 +92,9 @@ internal sealed class SonyLensCorrection
             return new SonyLensCorrection
             {
                 Distortion = distortionKnots.Select(v => 1f + v / 16384f).ToArray(),
-                Vignetting = Knots(vignetting)?.Select(v => MathF.Pow(2, 0.5f - MathF.Pow(2, v / 8192f - 1))).ToArray()
+                Vignetting = Knots(vignetting)?.Select(v => MathF.Pow(2, 0.5f - MathF.Pow(2, v / 8192f - 1))).ToArray(),
+                ChromaticRed = red,
+                ChromaticBlue = blue
             };
         }
         catch
@@ -351,6 +381,9 @@ internal static class RawDevelop
     /// Resamples the decoded RAW into the camera's frame. The curves are radial: an output
     /// pixel at radius r (0 at the centre, 1 at a corner) takes its colour from radius
     /// r * FrameScale * Distortion(r) in the source, brightened by 1 / Vignetting there.
+    /// Red and blue come from slightly different radii again (ChromaticRed / ChromaticBlue),
+    /// which lines them up with green and takes out the colour fringes a lens leaves on
+    /// high-contrast edges towards the corners.
     /// Radial, so it holds for portrait pictures too.
     /// </summary>
     private static byte[] Warp(byte[] src, int srcW, int srcH, int outW, int outH, SonyLensCorrection correction)
@@ -360,6 +393,7 @@ internal static class RawDevelop
         float srcHalfDiag = MathF.Sqrt(srcW * (float)srcW + srcH * (float)srcH) / 2;
         float[] distortion = correction.Distortion;
         float[]? vignetting = correction.Vignetting;
+        float[]? red = correction.ChromaticRed, blue = correction.ChromaticBlue;
 
         Parallel.For(0, outH, y =>
         {
@@ -370,48 +404,47 @@ internal static class RawDevelop
                 float ux = (x + 0.5f - outW / 2f) / outHalfDiag;
                 float r = MathF.Sqrt(ux * ux + uy * uy);
                 float m = FrameScale * Interpolate(distortion, r);
-
-                float sx = srcW / 2f + ux * m * srcHalfDiag - 0.5f;
-                float sy = srcH / 2f + uy * m * srcHalfDiag - 0.5f;
                 float gain = vignetting is null ? 1f : 1f / Interpolate(vignetting, r * m);
 
-                SampleBilinear(src, srcW, srcH, sx, sy, gain, dst, row + x * 4);
+                float mr = red is null ? m : m * Interpolate(red, r);
+                float mb = blue is null ? m : m * Interpolate(blue, r);
+
+                // BGRA: channel 0 is blue, 1 green, 2 red.
+                int at = row + x * 4;
+                dst[at] = Develop(Sample(src, srcW, srcH, ux * mb * srcHalfDiag, uy * mb * srcHalfDiag, 0), gain);
+                dst[at + 1] = Develop(Sample(src, srcW, srcH, ux * m * srcHalfDiag, uy * m * srcHalfDiag, 1), gain);
+                dst[at + 2] = Develop(Sample(src, srcW, srcH, ux * mr * srcHalfDiag, uy * mr * srcHalfDiag, 2), gain);
+                dst[at + 3] = 255;
             }
         });
         return dst;
     }
 
-    private static void SampleBilinear(byte[] src, int w, int h, float x, float y, float gain, byte[] dst, int at)
+    /// <summary>One channel, bilinear, at an offset in pixels from the source's centre.</summary>
+    private static float Sample(byte[] src, int w, int h, float dx, float dy, int channel)
     {
-        x = Math.Clamp(x, 0, w - 1);
-        y = Math.Clamp(y, 0, h - 1);
+        float x = Math.Clamp(w / 2f + dx - 0.5f, 0, w - 1);
+        float y = Math.Clamp(h / 2f + dy - 0.5f, 0, h - 1);
         int x0 = (int)x, y0 = (int)y;
         int x1 = Math.Min(x0 + 1, w - 1), y1 = Math.Min(y0 + 1, h - 1);
         float fx = x - x0, fy = y - y0;
-        int i00 = (y0 * w + x0) * 4, i10 = (y0 * w + x1) * 4, i01 = (y1 * w + x0) * 4, i11 = (y1 * w + x1) * 4;
 
-        for (int c = 0; c < 3; c++)
-        {
-            float top = src[i00 + c] + (src[i10 + c] - src[i00 + c]) * fx;
-            float bottom = src[i01 + c] + (src[i11 + c] - src[i01 + c]) * fx;
-            float value = top + (bottom - top) * fy;
+        float top = src[(y0 * w + x0) * 4 + channel] + (src[(y0 * w + x1) * 4 + channel] - src[(y0 * w + x0) * 4 + channel]) * fx;
+        float bottom = src[(y1 * w + x0) * 4 + channel] + (src[(y1 * w + x1) * 4 + channel] - src[(y1 * w + x0) * 4 + channel]) * fx;
+        return top + (bottom - top) * fy;
+    }
 
-            if (gain != 1f)
-            {
-                // Light adds up linearly; the decoded pixels are sRGB-encoded.
-                int code = (int)value;
-                float frac = value - code;
-                float linear = code >= 255 ? ToLinear[255]
-                    : ToLinear[code] + (ToLinear[code + 1] - ToLinear[code]) * frac;
-                int index = (int)(Math.Clamp(linear * gain, 0f, 1f) * (ToSrgbSize - 1) + 0.5f);
-                dst[at + c] = ToSrgb[index];
-            }
-            else
-            {
-                dst[at + c] = (byte)(value + 0.5f);
-            }
-        }
-        dst[at + 3] = 255;
+    /// <summary>Applies the vignetting gain to an sRGB-encoded value.</summary>
+    private static byte Develop(float value, float gain)
+    {
+        if (gain == 1f) return (byte)(value + 0.5f);
+
+        // Light adds up linearly; the decoded pixels are sRGB-encoded.
+        int code = (int)value;
+        float frac = value - code;
+        float linear = code >= 255 ? ToLinear[255] : ToLinear[code] + (ToLinear[code + 1] - ToLinear[code]) * frac;
+        int index = (int)(Math.Clamp(linear * gain, 0f, 1f) * (ToSrgbSize - 1) + 0.5f);
+        return ToSrgb[index];
     }
 
     private static float Interpolate(float[] knots, float r)
