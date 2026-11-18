@@ -596,22 +596,34 @@ public sealed partial class MainWindow : Window
 
     /// <summary>
     /// A line for the confirmation dialogs when some of the items are more than one file,
-    /// so nobody is surprised that the RAW went too. Empty when there is nothing to say.
+    /// so nobody is surprised that the RAW or the sidecar went too.
+    /// Empty when there is nothing to say.
     /// </summary>
     private static string CompanionNote(IEnumerable<MediaItem> items)
     {
-        int pairs = 0, extras = 0;
+        int total = 0, withCompanions = 0, companions = 0;
+        var formats = new List<string>();
         foreach (var item in items)
         {
-            if (item.PairedRawFormat is not null) pairs++;
-            extras += item.CompanionPaths.Count;
+            total++;
+            if (item.CompanionPaths.Count == 0) continue;
+            withCompanions++;
+            companions += item.CompanionPaths.Count;
+            foreach (var format in item.CompanionFormats)
+                if (!formats.Contains(format)) formats.Add(format);
         }
 
-        if (extras == 0) return "";
-        if (pairs == 0) return "\n\nRAW files take their .xmp sidecar files with them.";
+        if (withCompanions == 0) return "";
 
-        return $"\n\n{pairs} of these {(pairs == 1 ? "is a RAW+JPEG pair" : "are RAW+JPEG pairs")}: " +
-               "the RAW file and any .xmp sidecar files go with the JPEG.";
+        string kinds = string.Join(", ", formats.Take(6)) + (formats.Count > 6 ? ", ..." : "");
+        string go = companions == 1 ? "goes" : "go";
+        if (total == 1)
+            return $"\n\nIt comes with {Files(companions)} of the same name ({kinds}), which {go} with it.";
+        if (withCompanions == 1)
+            return $"\n\nOne of these comes with {Files(companions)} of the same name ({kinds}), which {go} with it.";
+        return $"\n\n{withCompanions} of these come with {Files(companions)} of the same name ({kinds}), which go with them.";
+
+        static string Files(int n) => n == 1 ? "another file" : $"{n} other files";
     }
 
     private void RemoveItems(IReadOnlyList<MediaItem> removed)
@@ -995,7 +1007,8 @@ public sealed partial class MainWindow : Window
             ? $"{bytes / 1024.0 / 1024.0:0.#} MB"
             : $"{Math.Max(1, bytes / 1024)} KB";
 
-        string name = item.PairedRawFormat is { } raw ? $"{item.FileName} + {raw}" : item.FileName;
+        var formats = item.CompanionFormats;
+        string name = formats.Count > 0 ? $"{item.FileName} + {string.Join(", ", formats)}" : item.FileName;
 
         CaptionText.Text = $"{name}    ·    {size}    ·    {item.LastWriteUtc.ToLocalTime():g}" +
                            (item.IsMarked ? $"    ·    {item.GroupName}" : "") +

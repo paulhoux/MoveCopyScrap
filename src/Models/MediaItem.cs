@@ -46,15 +46,25 @@ public sealed class MediaItem : INotifyPropertyChanged
 
     // ---- companion files -------------------------------------------------
     //
-    // A RAW+JPEG pair is one item: the JPEG is what we show (it opens fast and already has
-    // the camera's colours and orientation) and the RAW travels with it. Edit sidecars that
-    // belong to a RAW (DSC01234.xmp, DSC01234.ARW.xmp) travel with it too. Copy, move and
-    // delete always act on Path plus every companion, so a pair is never split up.
+    // Files that belong with this one are part of the same item (MediaGrouping): the RAW of a
+    // RAW+JPEG pair, edit sidecars, a video's thumbnail. One file is shown and the rest
+    // travel with it. Copy, move and delete always act on Path plus every
+    // companion, so an item is never split up.
 
     private readonly List<string> _companionPaths = new();
 
-    /// <summary>Files that go wherever this one goes: a paired RAW, RAW sidecars.</summary>
+    /// <summary>Files that go wherever this one goes.</summary>
     public IReadOnlyList<string> CompanionPaths => _companionPaths;
+
+    /// <summary>
+    /// The companions' formats for display, e.g. "ARW", "XMP": the last extension of each,
+    /// upper case, without repeats, in companion order. Empty for a single file.
+    /// </summary>
+    public IReadOnlyList<string> CompanionFormats =>
+        _companionPaths.Select(p => System.IO.Path.GetExtension(p).TrimStart('.').ToUpperInvariant())
+                       .Select(f => f.Length == 0 ? "(no extension)" : f)
+                       .Distinct()
+                       .ToList();
 
     /// <summary>The shown file first, then its companions.</summary>
     public IEnumerable<string> AllPaths
@@ -66,19 +76,14 @@ public sealed class MediaItem : INotifyPropertyChanged
         }
     }
 
-    /// <summary>Format of the paired RAW, e.g. "ARW", or null when this is not a pair.</summary>
-    public string? PairedRawFormat { get; private set; }
-
     /// <summary>Size of this file plus its companions.</summary>
     public long TotalSizeBytes { get; private set; }
 
     /// <summary>Called by the scanner, before the item is shown.</summary>
-    internal void AddCompanion(string path, long sizeBytes, bool isPairedRaw)
+    internal void AddCompanion(string path, long sizeBytes)
     {
         _companionPaths.Add(path);
         TotalSizeBytes += sizeBytes;
-        if (isPairedRaw)
-            PairedRawFormat = System.IO.Path.GetExtension(path).TrimStart('.').ToUpperInvariant();
     }
 
     public string Path { get; private set; }

@@ -75,15 +75,35 @@ Panasonic RW2 and more) are shown alongside everything else.
   about 1 px after. The vignetting correction follows darktable's reading of Sony's data
   and has only been seen at f/13-16, where it is under 2%; wide-open shots are untested.
 
-**RAW+JPEG pairs.** When a RAW and a JPEG (or HEIC) have the same name, as cameras write
-them in RAW+JPEG mode (`DSC01234.ARW` + `DSC01234.JPG`), they are one item: the JPEG is
-shown, the caption reads `DSC01234.JPG + ARW`, and marking, copying, moving and deleting
-always take both files. Edit sidecars belonging to a RAW (`DSC01234.xmp` from Lightroom or
-Capture One, `DSC01234.ARW.xmp` from darktable) go with it too. If one file of an item
-cannot be copied or moved, the others are put back, so a pair is never split. When the
-destination already has the name, all files get the same `(2)` suffix.
+**Files that belong to a picture or video travel with it.** Every picture and video is
+an item of its own, and other files with the same name join it, whatever their
+extension: edit sidecars (`DSC01234.xmp` from Lightroom or Capture One), a video's
+thumbnail and proxy (`GX010001.MP4` + `.THM` + `.LRV`). Files named after it in full join
+it as well (`DSC01234.ARW.xmp` from darktable, `IMG_1234.jpg.json` from Google Takeout).
+The name is everything before the *last* dot, so `Trip.2026.jpg` and `Trip.2026.xmp`
+belong together but `Trip.2027.jpg` does not.
+
+Two pictures or videos are never merged, even with the same name: a phone's Live Photo
+(`IMG_1234.HEIC` + `IMG_1234.MOV`) or `A.jpg` + `A.png` are separate items. The one
+exception is a camera's RAW+JPEG pair - exactly one RAW and one JPEG or HEIC of a name -
+which is one item, shown by the JPEG. A same-name file that could belong to more than one
+item (`IMG_1234.AAE` next to a Live Photo's HEIC and MOV) joins none of them and is left
+alone.
+
+The caption lists an item's other files (`DSC01234.JPG + ARW, XMP`), and the confirmation
+dialogs say when other files are coming along. Marking, copying, moving and deleting
+always take every file of an item. If one file cannot be copied or moved, the others are
+put back, so an item is never split. When the destination already has the name, all
+files get the same `(2)` suffix. Files that belong to no picture or video are not shown
+and never touched.
 
 Rotating a pair turns the JPEG only; the RAW file is never modified.
+
+Run the grouping checks with:
+
+```powershell
+dotnet run --project tests/GroupingChecks/GroupingChecks.csproj
+```
 
 ## Quick start
 
@@ -404,6 +424,7 @@ src/
   Models/MediaItem.cs        One file: marks, thumbnail, aspect ratio, rotation (INPC)
   Services/
     MediaScanner.cs          Folder enumeration + Explorer-style natural sort
+    MediaGrouping.cs         Which files with the same name form one item
     ThumbnailService.cs      Background thumbnails, bounded concurrency
     ImageLoader.cs           Decode-to-display-size, LRU cache
     RawPreview.cs            The JPEG preview embedded in a RAW
