@@ -87,7 +87,7 @@ $AppName     = 'MoveCopyScrap'
 $ExeName     = 'MoveCopyScrap.exe'
 
 # The lowest .NET major version the project's TargetFramework can build against.
-$MinDotnetMajor = 8
+$MinDotnetMajor = 10
 
 # Declared up front: StrictMode errors on a read of an undefined variable.
 $script:CMakeExe = $null
@@ -343,7 +343,7 @@ function Resolve-DotnetSdk {
         if ($probe.ExitCode -ne 0) { continue }
 
         foreach ($line in $probe.Output) {
-            # e.g. "8.0.424 [C:\Program Files\dotnet\sdk]"
+            # e.g. "10.0.404 [C:\Program Files\dotnet\sdk]"
             if ("$line" -match '^\s*(?<major>\d+)\.\d+\.\d+' -and
                 [int]$Matches['major'] -ge $MinDotnetMajor) {
                 return [pscustomobject]@{ Path = $candidate; Sdks = @($probe.Output | ForEach-Object { "$_".Trim() }) }

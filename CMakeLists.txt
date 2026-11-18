@@ -112,8 +112,8 @@ if(MCS_DOTNET_EXECUTABLE)
 
     if(_mcs_sdks_rc EQUAL 0 AND _mcs_sdks)
         string(REPLACE "\r" "" _mcs_sdks "${_mcs_sdks}")
-        # Accept .NET 8 or newer.
-        if(_mcs_sdks MATCHES "(^|\n)(8|9|1[0-9])\\.")
+        # Accept .NET 10 or newer (the project targets net10.0).
+        if(_mcs_sdks MATCHES "(^|\n)(1[0-9]|[2-9][0-9])\\.")
             set(MCS_DOTNET_USABLE TRUE)
         endif()
         string(REPLACE "\n" ", " _mcs_sdks_oneline "${_mcs_sdks}")
@@ -190,8 +190,8 @@ endif()
 if(MCS_BUILD_DRIVER STREQUAL "dotnet")
     if(NOT MCS_DOTNET_USABLE)
         message(FATAL_ERROR
-            "MCS_BUILD_DRIVER=dotnet but no .NET 8+ SDK was found.\n"
-            "Install it from https://dotnet.microsoft.com/download/dotnet/8.0 "
+            "MCS_BUILD_DRIVER=dotnet but no .NET 10+ SDK was found.\n"
+            "Install it from https://dotnet.microsoft.com/download/dotnet/10.0 "
             "(the 'SDK', not just the runtime), or pass -DMCS_BUILD_DRIVER=msbuild.")
     endif()
     set(_mcs_driver "dotnet")
@@ -211,7 +211,7 @@ else()
     set(_mcs_hint "")
     if(MCS_DOTNET_EXECUTABLE)
         set(_mcs_hint
-            "  'dotnet' was found at ${MCS_DOTNET_EXECUTABLE} but reports no .NET 8+ SDK.\n"
+            "  'dotnet' was found at ${MCS_DOTNET_EXECUTABLE} but reports no .NET 10+ SDK.\n"
             "  You most likely have only the .NET *runtime* installed; the SDK is a separate download.\n")
     endif()
 
@@ -221,9 +221,9 @@ else()
         "Fix it with either of these, then delete the build directory and re-configure:\n"
         "\n"
         "  1. Install the standalone .NET SDK (recommended, smallest download):\n"
-        "         winget install --id Microsoft.DotNet.SDK.8 -e\n"
+        "         winget install --id Microsoft.DotNet.SDK.10 -e\n"
         "     ...then open a NEW terminal so PATH is refreshed.\n"
-        "     Manual download: https://dotnet.microsoft.com/download/dotnet/8.0\n"
+        "     Manual download: https://dotnet.microsoft.com/download/dotnet/10.0\n"
         "\n"
         "  2. Or add the managed workload to your Visual Studio 2022 installation:\n"
         "         vs_installer.exe modify --installPath \"<your VS install>\" \\\n"

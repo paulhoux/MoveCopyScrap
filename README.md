@@ -4,7 +4,7 @@ A fast photo/video culling tool for Windows. Point it at a folder, fly through t
 with the arrow keys, hit **Space** on the keepers, then copy, move or delete the marked set
 in one go.
 
-* **WinUI 3 / C#** (.NET 8, Windows App SDK), unpackaged and xcopy-deployable
+* **WinUI 3 / C#** (.NET 10, Windows App SDK 2), unpackaged and xcopy-deployable
 * **CMake** drives configure / build / install on top of Visual Studio 2022's MSBuild
 * 3D perspective carousel animated entirely on the compositor thread
 * Background thumbnail generation, virtualized filmstrip
@@ -95,7 +95,7 @@ What it fetches, each only if missing:
 
 | Prerequisite | Why | Source |
 | --- | --- | --- |
-| .NET 8 SDK | Compiles the C# and the XAML | `winget Microsoft.DotNet.SDK.8` |
+| .NET 10 SDK | Compiles the C# and the XAML | `winget Microsoft.DotNet.SDK.10` |
 | CMake ≥ 3.21 | Drives the build | Visual Studio's copy, else `winget Kitware.CMake` |
 | Ninja | Only when Visual Studio is absent | Visual Studio's copy, else `winget Ninja-build.Ninja` |
 | Visual C++ runtime | The Windows App SDK's native DLLs link against it | `winget Microsoft.VCRedist.2015+.x64` |
@@ -113,7 +113,7 @@ The rest of this section describes doing it by hand.
 
 ### Prerequisites
 
-* **.NET 8 SDK or newer** — <https://dotnet.microsoft.com/download/dotnet/8.0>
+* **.NET 10 SDK or newer** — <https://dotnet.microsoft.com/download/dotnet/10.0>
   (the *SDK*, not just the runtime). This is what actually compiles the project.
 * **Windows 11 SDK 10.0.22621 or newer** (any Visual Studio 2022 install, including
   Build Tools, provides one).

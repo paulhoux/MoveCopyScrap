@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
     <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
     <SupportedOSPlatformVersion>10.0.17763.0</SupportedOSPlatformVersion>
 
@@ -60,12 +60,18 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- Floating version: picks up the newest installed/available 1.7.x so the
-         build does not break on an exact patch number. Pin it if you prefer. -->
-    <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.7.*" />
+    <!-- WinUI 3 from the Windows App SDK. Since 2.0 the SDK is split into component
+         packages; this one brings Foundation, InteractiveExperiences (Composition,
+         Windowing, Input) and Base, which is everything the app uses. The full
+         Microsoft.WindowsAppSDK metapackage would add the AI/ML/Search/Widgets
+         components too, about 60 MB of self-contained output (ONNX Runtime, DirectML)
+         that nothing here calls.
+         Floating version: newest 2.x, so the build does not break on an exact patch
+         number. Pin it if you prefer. -->
+    <PackageReference Include="Microsoft.WindowsAppSDK.WinUI" Version="2.*" />
     <!-- Draws video frames ourselves (frame-server mode) instead of using
          MediaPlayerElement, which could freeze on the first frame in the carousel. -->
-    <PackageReference Include="Microsoft.Graphics.Win2D" Version="1.3.*" />
+    <PackageReference Include="Microsoft.Graphics.Win2D" Version="1.4.*" />
     <!-- Installer and automatic updates. Pinned: it must match the vpk tool release.ps1 uses. -->
     <PackageReference Include="Velopack" Version="1.2.161" />
   </ItemGroup>
